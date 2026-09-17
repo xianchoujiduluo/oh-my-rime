@@ -162,9 +162,45 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\tools\install.ps1 -Uninstall -Purge
 .\tools\install.ps1 -DryRun
 .\tools\install.ps1 -NoDeploy
+.\tools\install.ps1 -WeaselDir "C:\Program Files\Rime"
 ```
 
 `-Repo` 已预置为本仓库，如需从上游或其他 fork 安装可用它覆盖。
+
+#### 重新部署与小狼毫安装目录
+
+安装/卸载完成后，脚本会尝试自动执行 `WeaselDeployer.exe /deploy`。
+
+小狼毫的安装目录按以下顺序查找：
+
+1. 命令行显式传入的 `-WeaselDir`
+2. 注册表 `HKLM\SOFTWARE\Rime\Weasel` 的 `InstallDir` / `WeaselRoot`
+   （32 位进程会落到 `WOW6432Node`，脚本会一并查询）
+3. 常见默认位置：`%ProgramFiles%\Rime`、`%ProgramFiles(x86)%\Rime`、
+   `%ProgramW6432%\Rime`、`%LOCALAPPDATA%\Programs\Rime`
+4. 在 `%ProgramFiles%\Rime` 下递归查找
+5. `PATH`
+
+若提示 **未找到 WeaselDeployer.exe**，脚本会列出已尝试的路径。此时：
+
+```powershell
+# 方式一：显式指定安装目录（最常见为 "C:\Program Files\Rime"）
+.\tools\install.ps1 -WeaselDir "C:\Program Files\Rime"
+
+# 方式二：手动重新部署
+#   右键任务栏「中」图标 → 重新部署
+#   或开始菜单 → 小狼毫输入法 → 【小狼毫】重新部署
+
+# 方式三：自己跑 deployer（路径换成实际安装目录）
+& "C:\Program Files\Rime\WeaselDeployer.exe" /deploy
+```
+
+> `WeaselDeployer.exe` 的可用参数：`/deploy`（更新工作区/重新部署）、
+> `/dict`（词典管理）、`/sync`（同步用户数据）、`/install`（初始部署）。
+> 脚本使用 `/deploy`。
+
+若自动部署返回非 0 退出码，脚本会提示查看 `%TEMP%` 下的 `rime.weasel.*` 日志；
+YAML 出错时，有问题的文件会被 Rime 移入 `<Rime 用户目录>\trash\`。
 
 ---
 

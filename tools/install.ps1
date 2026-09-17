@@ -57,7 +57,10 @@ param(
     [switch] $DryRun,
 
     # 不尝试自动重新部署
-    [switch] $NoDeploy
+    [switch] $NoDeploy,
+
+    # 小狼毫安装目录（含 WeaselDeployer.exe）。仅在自动查找失败时需要
+    [string] $WeaselDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -113,16 +116,63 @@ if ($Target -match '^[A-Za-z]:\\?$' -or ($homeDir -and $Target.TrimEnd('\') -eq 
 }
 
 function Find-WeaselDeployer {
-    $roots = @(
-        (Join-Path ${env:ProgramFiles} 'Rime'),
-        (Join-Path ${env:ProgramFiles(x86)} 'Rime')
-    ) | Where-Object { $_ -and $env:ProgramFiles -and (Test-Path $_) }
+    # 依次尝试：显式 -WeaselDir → 注册表（安装程序自己就用这两个键）→ 常见默认目录
+    # → 递归兜底 → PATH。返回 WeaselDeployer.exe 的完整路径，找不到则返回 $null。
+    $script:DeployerSearchPaths = @()
+    $candidates = New-Object System.Collections.Generic.List[string]
 
-    foreach ($root in $roots) {
-        $exe = Get-ChildItem -Path $root -Recurse -Filter 'WeaselDeployer.exe' -ErrorAction SilentlyContinue |
-               Select-Object -First 1
-        if ($exe) { return $exe.FullName }
+    # 0) 显式指定优先
+    if ($WeaselDir) {
+        if (-not (Test-Path -LiteralPath $WeaselDir)) {
+            Write-Err "-WeaselDir 指定的目录不存在: $WeaselDir"
+            return $null
+        }
+        $candidates.Add((Join-Path $WeaselDir 'WeaselDeployer.exe'))
     }
+
+    # 1) 注册表：HKLM\SOFTWARE\Rime\Weasel 的 InstallDir / WeaselRoot
+    #    64 位进程读前者，32 位进程会落到 WOW6432Node，两个都查。
+    foreach ($regPath in 'HKLM:\SOFTWARE\Rime\Weasel', 'HKLM:\SOFTWARE\WOW6432Node\Rime\Weasel') {
+        foreach ($valueName in 'InstallDir', 'WeaselRoot') {
+            try {
+                $dir = (Get-ItemProperty -Path $regPath -Name $valueName -ErrorAction Stop).$valueName
+                if ($dir) { $candidates.Add((Join-Path $dir 'WeaselDeployer.exe')) }
+            } catch { }
+        }
+    }
+
+    # 2) 常见默认位置。注意 32/64 位与 ARM64 下 $env:ProgramFiles 含义不同，
+    #    三个变量都收集，去重后再试。
+    $progDirs = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432) |
+                Where-Object { $_ } | Select-Object -Unique
+    foreach ($p in $progDirs) {
+        $candidates.Add((Join-Path $p 'Rime\WeaselDeployer.exe'))
+    }
+    # 用户级安装（部分安装器会装到这里）
+    if ($env:LOCALAPPDATA) {
+        $candidates.Add((Join-Path $env:LOCALAPPDATA 'Programs\Rime\WeaselDeployer.exe'))
+    }
+
+    $script:DeployerSearchPaths = $candidates
+
+    foreach ($c in $candidates) {
+        if (Test-Path -LiteralPath $c -PathType Leaf) { return $c }
+    }
+
+    # 3) 兜底：在 <ProgramFiles>\Rime 下递归查找，应对自定义子目录
+    foreach ($p in $progDirs) {
+        $root = Join-Path $p 'Rime'
+        if (Test-Path -LiteralPath $root) {
+            $exe = Get-ChildItem -LiteralPath $root -Recurse -Filter 'WeaselDeployer.exe' `
+                                 -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($exe) { return $exe.FullName }
+        }
+    }
+
+    # 4) 最后看 PATH
+    $cmd = Get-Command 'WeaselDeployer.exe' -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source) { return $cmd.Source }
+
     return $null
 }
 
@@ -138,13 +188,33 @@ function Invoke-Redeploy {
             Write-Host "    [dry-run] & `"$deployer`" /deploy"
         } else {
             Write-Info "调用 $deployer /deploy"
-            & $deployer /deploy | Out-Null
-            Write-Info "已触发重新部署"
+            # WeaselDeployer 是 GUI 程序，/deploy 不阻塞；用 Start-Process 等待其退出，
+            # 以便报告失败。部分旧版本会立即返回，此时视为已触发。
+            $p = Start-Process -FilePath $deployer -ArgumentList '/deploy' -PassThru -ErrorAction SilentlyContinue
+            if ($p) {
+                if (-not $p.WaitForExit(30000)) {
+                    Write-Info '已触发重新部署（部署进程仍在后台运行）'
+                } elseif ($p.ExitCode -eq 0) {
+                    Write-Info '已触发重新部署'
+                } else {
+                    Write-Warn "WeaselDeployer 返回退出码 $($p.ExitCode)，可能部署失败；请查看 `$env:TEMP 下的 rime.weasel.* 日志"
+                }
+            } else {
+                Write-Warn '无法启动 WeaselDeployer，请手动重新部署'
+            }
         }
     } else {
-        Write-Warn '未找到 WeaselDeployer.exe，请手动操作：'
+        Write-Warn '未找到 WeaselDeployer.exe，请手动重新部署：'
         Write-Host '  • 右键任务栏「中」图标 → 重新部署'
         Write-Host '  • 或 开始菜单 → 小狼毫输入法 → 【小狼毫】重新部署'
+        Write-Host ''
+        Write-Warn '若已安装小狼毫，可用 -WeaselDir 指定它的安装目录，例如：'
+        Write-Host '    .\install.ps1 -WeaselDir "C:\Program Files\Rime"'
+        Write-Host ''
+        Write-Host '已尝试以下位置：'
+        foreach ($c in $script:DeployerSearchPaths) { Write-Host "    $c" }
+        Write-Host '  也可自行执行（把路径换成实际安装目录）：'
+        Write-Host '    & "C:\Program Files\Rime\WeaselDeployer.exe" /deploy'
     }
 }
 
