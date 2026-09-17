@@ -1,0 +1,89 @@
+name: Release
+
+# 推送 v* 标签即触发；也可在 Actions 页面手动指定已有标签重发
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（例如 v1.0.0）'
+        required: true
+        type: string
+
+# 默认最小权限；只有需要创建 Release 的 job 才单独提权
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: 打包并发布 Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # gh release create/upload 需要
+    outputs:
+      tag: ${{ steps.tag.outputs.value }}
+    steps:
+      - name: 解析 tag
+        id: tag
+        run: echo "value=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: 打包
+        run: |
+          set -euo pipefail
+          # 用 python3 而非 zip 命令：GitHub runner 与本地都有 python3，
+          # 同一个脚本可在本地复现验证。
+          python3 tools/pack.py
+
+      - name: 创建 / 更新 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.value }}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，覆盖上传产物"
+            gh release upload "$TAG" dist/oh-my-rime.zip --clobber
+          else
+            gh release create "$TAG" dist/oh-my-rime.zip \
+              --title "$TAG" \
+              --generate-notes
+          fi
+
+          echo "✅ https://github.com/${{ github.repository }}/releases/tag/$TAG"
+
+  notify:
+    name: Email workflow result
+    needs: [release]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Send workflow result email
+        uses: dawidd6/action-send-mail@v6
+        with:
+          server_address: ${{ vars.SMTP_HOST }}
+          server_port: ${{ vars.SMTP_PORT }}
+          secure: true
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          from: ${{ secrets.SMTP_FROM }}
+          to: ${{ secrets.NOTIFY_EMAIL_TO }}
+          subject: "[${{ github.repository }}] ${{ needs.release.outputs.tag || github.event.inputs.tag || github.ref_name }} - ${{ needs.release.result }}"
+          body: |
+            Repository: ${{ github.repository }}
+            Tag:        ${{ needs.release.outputs.tag || github.event.inputs.tag || github.ref_name }}
+            Commit:     ${{ github.sha }}
+            Trigger:    ${{ github.event_name }}
+
+            打包并发布 Release: ${{ needs.release.result }}
+
+            成功时产物地址:
+            https://github.com/${{ github.repository }}/releases/tag/${{ needs.release.outputs.tag || github.event.inputs.tag || github.ref_name }}

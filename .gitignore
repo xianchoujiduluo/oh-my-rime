@@ -20,3 +20,8 @@ sync/
 
 # 语言模型文件
 *.gram
+
+# 打包产物
+# dist/ 与 manifest.txt 由 tools/pack.py 生成，不入库
+dist/
+manifest.txt
