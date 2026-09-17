@@ -27,8 +27,24 @@
 | `opencc/` | 简繁、Emoji 等 OpenCC 配置（`.json`）与其词表（`.txt`） |
 | `default.yaml` / `squirrel.yaml` / `weasel.yaml` / `ibus_rime.yaml` | 各平台全局配置 |
 | `plum/full.recipe.yaml` | plum 全量安装/更新清单。**新增顶层文件后需同步更新此清单**，否则不会被安装 |
-| `.github/workflows/` | 仅有 `mirrorToCNB.yaml`（同步到 CNB），**没有 YAML 校验或测试 CI** |
+| `.github/workflows/` | `release.yaml`（`v*` tag / `workflow_dispatch` 触发，打包并发布 Release，末尾邮件通知）、`mirrorToCNB.yaml`（同步到 CNB）。没有 YAML 校验或测试 CI |
 | `.cnb.yml` / `.ide/Dockerfile` | CNB 发布流水线与开发容器 |
+
+## 发布链路与所需凭据
+
+`release.yaml` 需要以下 Actions 配置，缺任意一项会导致对应步骤失败：
+
+| 类型 | 名称 | 用途 |
+| --- | --- | --- |
+| Variable | `SMTP_HOST` | SMTP 服务器，如 `smtp.gmail.com` |
+| Variable | `SMTP_PORT` | SMTP 端口，如 `465`（隐式 TLS） |
+| Secret | `SMTP_USERNAME` | SMTP 登录名（通常是完整邮箱） |
+| Secret | `SMTP_PASSWORD` | SMTP 密码或 App Password（非账号主密码） |
+| Secret | `SMTP_FROM` | 发件地址，通常与 `SMTP_USERNAME` 一致 |
+| Secret | `NOTIFY_EMAIL_TO` | 收件地址，多个用逗号分隔 |
+| Secret | `CNB_GIT_PASSWORD` | 仅 `mirrorToCNB.yaml` 使用，CNB 推送凭据 |
+
+注意：`GITHUB_TOKEN` 由 Actions 自动注入，无需手动创建。上游仓库的 secrets 不会复制到 fork，需在本 fork 自行配置。
 
 ## 关键约定
 

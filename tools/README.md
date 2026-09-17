@@ -178,7 +178,25 @@ git push origin v1.0.0
 ```
 
 流水线会执行 `python3 tools/pack.py`，并把 `dist/oh-my-rime.zip` 发布到 Release。
-也可在 Actions 页面用 `workflow_dispatch` 手动指定 tag 重发。
+也可在 Actions 页面用 `workflow_dispatch` 手动指定 tag 重发（已有 Release 会走 `gh release upload --clobber` 覆盖）。
+
+发布结束后会统一发送一封结果邮件（`Email workflow result` job），正文含
+`needs.release.result`，可区分成功、失败与取消。
+
+### 邮件通知所需配置
+
+在 **Settings → Secrets and variables → Actions** 中配置，缺任意一项会导致通知 job 失败：
+
+| 类型 | 名称 | 示例 / 说明 |
+| --- | --- | --- |
+| Variable | `SMTP_HOST` | `smtp.gmail.com` |
+| Variable | `SMTP_PORT` | `465`（隐式 TLS） |
+| Secret | `SMTP_USERNAME` | 完整邮箱地址 |
+| Secret | `SMTP_PASSWORD` | 服务商 App Password，**不要用账号主密码** |
+| Secret | `SMTP_FROM` | 发件地址，通常与 `SMTP_USERNAME` 一致 |
+| Secret | `NOTIFY_EMAIL_TO` | 收件地址，多个用逗号分隔 |
+
+用 Gmail 发信需先开启两步验证并创建 App Password。`GITHUB_TOKEN` 由 Actions 自动注入，无需配置。
 
 ### 本地复现 CI 打包
 
