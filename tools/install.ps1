@@ -63,6 +63,18 @@ param(
 $ErrorActionPreference = 'Stop'
 $AssetName = 'oh-my-rime.zip'
 
+# 以文件方式运行（powershell -File）时 $MyInvocation.MyCommand.Path 有值；
+# 以 `irm ... | iex` 或 scriptblock 方式执行时为空。
+# 后者不能调 exit，否则会连带关掉用户当前的 PowerShell 会话。
+$script:RunningAsFile = [bool]$MyInvocation.MyCommand.Path
+
+# 终止脚本：文件模式用 exit 传递退出码，表达式模式只中断当前脚本块。
+function Stop-Script {
+    param([int] $Code = 0)
+    if ($script:RunningAsFile) { exit $Code }
+    throw [System.OperationCanceledException]::new("oh-my-rime install: 中止（退出码 $Code）")
+}
+
 # ---------------------------------------------------------------------------
 # 输出helpers
 # ---------------------------------------------------------------------------
@@ -97,7 +109,7 @@ $Target = [System.IO.Path]::GetFullPath($Target)
 $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
 if ($Target -match '^[A-Za-z]:\\?$' -or ($homeDir -and $Target.TrimEnd('\') -eq $homeDir.TrimEnd('\'))) {
     Write-Err "拒绝操作危险目录: $Target"
-    exit 1
+    Stop-Script 1
 }
 
 function Find-WeaselDeployer {
@@ -145,7 +157,7 @@ function Invoke-Uninstall {
         Write-Err "找不到 $manifest —— 无法确定哪些文件属于本项目。"
         Write-Host '    如果你是从 zip 手动解压的（旧版本不带 manifest.txt），请手动清理，'
         Write-Host '    或先用新版脚本覆盖安装一次后再卸载。'
-        exit 1
+        Stop-Script 1
     }
 
     Write-Info "读取清单: $manifest"

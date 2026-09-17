@@ -30,6 +30,31 @@ warn()  { printf '%s\n' "${YELLOW}[!]${RESET} $*" >&2; }
 die()   { printf '%s\n' "${RED}[x]${RESET} $*" >&2; exit 1; }
 
 DRY_RUN=0
+
+# --help 的正文内嵌，不依赖 $0：通过 `curl ... | bash` 管道执行时 $0 是 "bash"，
+# 用 sed 读脚本文件会报错。
+usage() {
+  cat <<'USAGE'
+oh-my-rime 安装 / 更新 / 卸载脚本 (macOS + Linux)
+
+用法:
+  install.sh                     # 自动识别 Rime 用户目录并安装/更新
+  install.sh --target DIR        # 指定 Rime 用户目录
+  install.sh --from ZIP          # 从本地 zip 安装（不联网）
+  install.sh --version v1.0.0    # 指定要安装的 tag
+  install.sh --uninstall         # 卸载（仅删除本项目安装的文件）
+  install.sh --uninstall --purge # 卸载并删除 build/ 缓存与用户词典
+  install.sh --dry-run           # 只打印将要做什么，不实际改动
+  install.sh --no-deploy         # 安装/卸载后不自动重新部署
+
+一行安装:
+  curl -fsSL https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.sh | bash
+
+环境变量:
+  OH_MY_RIME_REPO   覆盖仓库，默认 xianchoujiduluo/oh-my-rime
+USAGE
+  exit 0
+}
 run() {
   if [ "$DRY_RUN" = "1" ]; then
     printf '%s\n' "    [dry-run] $*"
@@ -56,7 +81,7 @@ while [ $# -gt 0 ]; do
     --version)    VERSION="${2:-}"; shift ;;
     --dry-run)    DRY_RUN=1 ;;
     --no-deploy)  NO_DEPLOY=1 ;;
-    -h|--help)    sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)    usage ;;
     *)            die "未知参数: $1（用 --help 查看用法）" ;;
   esac
   shift

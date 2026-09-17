@@ -64,6 +64,64 @@ find ./ -type f ! -name ".*" ! -path "*/.git/*" -exec zip oh-my-rime.zip {} +
 | macOS / Linux | `tools/install.sh` |
 | Windows (小狼毫) | `tools/install.ps1` |
 
+### 一行安装（推荐）
+
+**macOS / Linux** —— 终端里粘贴：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.sh | bash
+```
+
+**Windows** —— PowerShell 里粘贴（无需管理员权限）：
+
+```powershell
+irm https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.ps1 | iex
+```
+
+两个脚本都支持在管道/表达式方式下运行：
+
+- `install.sh` 的 `--help` 正文内嵌，不依赖 `$0`，因此 `curl | bash` 可用。
+- `install.ps1` 检测到非文件方式运行时改用异常而非 `exit` 中止，
+  因此 `irm | iex` **不会关闭你当前的 PowerShell 会话**。
+
+### 常用变体
+
+**macOS / Linux**
+
+```bash
+# 卸载 / 卸载并清空缓存
+curl -fsSL <上面的 URL> | bash -s -- --uninstall
+curl -fsSL <上面的 URL> | bash -s -- --uninstall --purge
+
+# 安装指定版本 / 指定目录
+curl -fsSL <上面的 URL> | bash -s -- --version v1.0.0
+curl -fsSL <上面的 URL> | bash -s -- --target ~/Library/Rime
+```
+
+**Windows**
+
+```powershell
+# 需要传参时先落盘再执行（保留错误详情）
+$u='https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.ps1'
+$f="$env:TEMP\omr.ps1"; irm $u -OutFile $f
+powershell -ExecutionPolicy Bypass -File $f -Version v1.0.0
+powershell -ExecutionPolicy Bypass -File $f -Uninstall
+powershell -ExecutionPolicy Bypass -File $f -Uninstall -Purge
+```
+
+### 脚本方式（仓库内或已下载）
+
+```bash
+./tools/install.sh                       # 自动识别 Rime 用户目录
+./tools/install.sh --target ~/Library/Rime
+./tools/install.sh --version v1.0.0      # 指定版本
+./tools/install.sh --from ./oh-my-rime.zip  # 从本地包安装
+./tools/install.sh --uninstall           # 卸载（保留用户数据）
+./tools/install.sh --uninstall --purge   # 连缓存/用户词典一起删
+./tools/install.sh --dry-run             # 只打印动作
+./tools/install.sh --no-deploy           # 不自动重新部署
+```
+
 ### 共同特性
 
 - **安装 / 更新一体**：已安装则先按旧 `manifest.txt` 清理旧文件，再复制新文件
