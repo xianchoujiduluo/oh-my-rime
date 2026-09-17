@@ -55,13 +55,69 @@ Rime 配置教程：
 
 ### 安裝
 
-以下教程，適用於Linux、macOS和Windows（Xp~）
+> 前提：請先安裝 [Rime 輸入法](https://rime.im/)（Windows 小狼毫 / macOS 鼠須管 / Linux ibus-rime、fcitx5-rime）並登出或重啟電腦。本倉庫只提供**配置方案**，不含輸入法程式本體。
 
-1. 安裝[Rime輸入法](https://rime.im/)併登出或重啟電腦；
-2. 下載本倉庫所有配置文件到在地rime配置文件；
-3. 重新部署Rime
-4. 開始使用
-5. 根據自己習慣，進行二次修改
+#### 一鍵安裝（推薦）
+
+**macOS / Linux** —— 終端執行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.sh | bash
+```
+
+**Windows** —— PowerShell 執行（無需管理員權限）：
+
+```powershell
+irm https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.ps1 | iex
+```
+
+腳本會自動完成：下載最新版方案包 → 放入 Rime 使用者目錄 → 觸發重新部署，並保留你的自訂配置與使用者詞典。
+
+#### 更新
+
+**重複執行上面的安裝命令即可。** 腳本會先按清單清理舊版本檔案，再複製新檔案，不會殘留已改名的舊方案。
+
+#### 卸載
+
+```bash
+# macOS / Linux：僅卸載，保留自訂配置、使用者詞典與快取
+curl -fsSL https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.sh | bash -s -- --uninstall
+
+# macOS / Linux：卸載並清空 build/ 快取與使用者詞典（個人詞頻會遺失）
+curl -fsSL https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.sh | bash -s -- --uninstall --purge
+```
+
+```powershell
+# Windows
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.ps1))) -Uninstall
+```
+
+> Windows 需要傳參時，建議先下載再執行，以便看到完整錯誤訊息：
+>
+> ```powershell
+> $f="$env:TEMP\omr.ps1"
+> irm https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.ps1 -OutFile $f
+> powershell -ExecutionPolicy Bypass -File $f -Uninstall
+> ```
+
+#### 常用參數
+
+| 參數 | 說明 |
+| --- | --- |
+| `--version v1.0.0` / `-Version v1.0.0` | 安裝指定版本，預設 `latest` |
+| `--target DIR` / `-Target DIR` | 指定 Rime 使用者目錄，預設自動識別 |
+| `--from ZIP` / `-From ZIP` | 從本地壓縮包安裝（離線） |
+| `--dry-run` / `-DryRun` | 只列印將要執行的動作，不實際改動 |
+| `--no-deploy` / `-NoDeploy` | 不自動重新部署 |
+| `--uninstall` / `-Uninstall` | 卸載 |
+
+#### 手動安裝
+
+1. 安裝 [Rime 輸入法](https://rime.im/) 並登出或重啟電腦；
+2. 下載本倉庫所有配置文件到本地 Rime 使用者目錄（見下方 [Tips](#tips)）；
+3. 重新部署 Rime；
+4. 開始使用；
+5. 根據自己習慣，進行二次修改。
 
 > 需要註意: Windows 7 和 Windows Xp只能使用 0.14.3 版本的Weasel，無法使用本輸入方案的全部功能，需要手動更新librime支援庫：[WinXP和Win7使用薄荷輸入法](https://www.mintimate.cc/zh/guide/faQ.html#winxp%E5%92%8Cwin7%E4%BD%BF%E7%94%A8%E8%96%84%E8%8D%B7%E8%BE%93%E5%85%A5%E6%B3%95)
 

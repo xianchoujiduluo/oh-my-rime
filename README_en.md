@@ -51,13 +51,71 @@ Currently, Mint comes with two sets of skins: blue series and green series. You 
 
 ### Install
 
-The following tutorials are available for Linux, macOS and Windows (Xp~)
+> Prerequisite: install [Rime](https://rime.im/) first (Weasel on Windows, Squirrel on macOS, ibus-rime or fcitx5-rime on Linux), then log out or reboot. This repository ships **configuration only** — not the input method itself.
 
-1. Install [Rime Input Method](https://rime.im/) and log out or restart the computer;
-2. Download all the configuration files of this warehouse to the local rime configuration file;
+#### One-line install (recommended)
+
+**macOS / Linux** — run in a terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.sh | bash
+```
+
+**Windows** — run in PowerShell (no administrator rights needed):
+
+```powershell
+irm https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.ps1 | iex
+```
+
+The script downloads the latest package, installs it into your Rime user directory, triggers a redeploy, and preserves your custom configs and user dictionary.
+
+#### Update
+
+**Just run the install command again.** The script first removes files from the previous version (using its manifest), then copies the new ones — so renamed schemas leave no stale files behind.
+
+#### Uninstall
+
+```bash
+# macOS / Linux: uninstall only; keeps custom configs, user dictionary and cache
+curl -fsSL https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.sh | bash -s -- --uninstall
+
+# macOS / Linux: also wipe build/ cache and user dictionary (your personal word frequency is lost)
+curl -fsSL https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.sh | bash -s -- --uninstall --purge
+```
+
+```powershell
+# Windows
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.ps1))) -Uninstall
+```
+
+> When you need to pass arguments on Windows, download the script first so you can see full error output:
+>
+> ```powershell
+> $f="$env:TEMP\omr.ps1"
+> irm https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.ps1 -OutFile $f
+> powershell -ExecutionPolicy Bypass -File $f -Uninstall
+> ```
+
+#### Common options
+
+| Option | Description |
+| --- | --- |
+| `--version v1.0.0` / `-Version v1.0.0` | Install a specific version; defaults to `latest` |
+| `--target DIR` / `-Target DIR` | Rime user directory; auto-detected by default |
+| `--from ZIP` / `-From ZIP` | Install from a local archive (offline) |
+| `--dry-run` / `-DryRun` | Print the actions without changing anything |
+| `--no-deploy` / `-NoDeploy` | Skip the automatic redeploy |
+| `--uninstall` / `-Uninstall` | Uninstall |
+
+#### Manual install
+
+1. Install [Rime](https://rime.im/) and log out or reboot;
+2. Download all configuration files of this repository into your local Rime user directory (see [Tips](#tips) below);
 3. Redeploy Rime;
-4. Get started
-5. Make secondary modifications according to your own habits
+4. Get started;
+5. Make secondary modifications according to your own habits.
+
+> Note: Windows 7 and Windows XP can only use Weasel 0.14.3, which cannot provide the full feature set of this schema and requires manually updating the librime support libraries: [Using Mint on WinXP and Win7](https://www.mintimate.cc/zh/guide/faQ.html#winxp%E5%92%8Cwin7%E4%BD%BF%E7%94%A8%E8%96%84%E8%8D%B7%E8%BE%93%E5%85%A5%E6%B3%95)
 
 ## Tips
 The default address of the local rime configuration file is as follows
@@ -127,6 +185,7 @@ dicts
 ├── rime_mint.ext.dict.yaml             # Wanxiang dictionary (auto-updated via GitHub Actions)  
 ├── wubi86_core.dict.yaml           # Wubi 86 core dictionary  
 └── wubi98_base.dict.yaml           # Wubi 98 base dictionary  
+```
 
 For subsequent updates to the dictionaries, you can download the files inside the `dicts` directory of this repository and replace the existing files, except for the `custom_simple.dict.yaml` file.
 
