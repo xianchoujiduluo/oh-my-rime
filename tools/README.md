@@ -8,6 +8,7 @@
 | `pack.py` | 打包为可分发的 `dist/oh-my-rime.zip` |
 | `install.sh` / `install.ps1` | 安装 / 更新 / 卸载配置方案 |
 | `rime-sync.sh` / `rime-sync.ps1` | 用 Git 同步**用户词典**（多设备） |
+| `skin.sh` | 命令行挑选皮肤（补 macOS 没有图形化皮肤选择器的缺口） |
 
 ---
 
@@ -337,6 +338,64 @@ git add -A && git rebase --continue
 
 ---
 
+## 挑选皮肤：`skin.sh`
+
+### 为什么需要这个脚本
+
+Windows 小狼毫有图形化的「输入法设定」可以勾选皮肤，但 **macOS 鼠须管从上游就没有这个界面**：
+
+- Squirrel 源码里**没有任何 `.xib` / `.storyboard`**，没实现过设置窗口
+- 菜单里的 `Settings...` 只是 `openRimeFolder()`——**打开 `~/Library/Rime` 文件夹**，不是设置界面
+
+所以 macOS 上换皮肤只能手写 `squirrel.custom.yaml`。本脚本用命令行提供等价的挑选体验：
+列出皮肤（带颜色预览）、输入编号、自动写入配置并重新部署。
+
+> 只用 bash，**不依赖 python / yq / PyYAML**，可在 macOS 自带的 bash 3.2 上运行。
+
+### 用法
+
+```bash
+./tools/skin.sh                     # 交互式：列出皮肤 → 输入编号 → 自动应用
+./tools/skin.sh --list              # 只列出所有皮肤（带色块预览）
+./tools/skin.sh --current           # 显示当前生效的亮色/暗色皮肤
+./tools/skin.sh --set mint_dark_green                  # 直接指定亮色
+./tools/skin.sh --set mint_dark_green mint_dark_blue   # 亮色 + 暗色
+./tools/skin.sh --preview solarized_dark               # 预览单个皮肤
+./tools/skin.sh --target ~/Library/Rime                # 指定用户目录
+./tools/skin.sh --no-deploy         # 改完不自动部署
+./tools/skin.sh --dry-run           # 只打印将写入的内容
+./tools/skin.sh --no-color          # 禁用色块（终端不支持真彩色时）
+```
+
+### 输出示例
+
+```
+*  1) ███ mint_light_blue          蓝水鸭／Mint Light Blue  ← 当前亮色
+   2) ███ mint_dark_blue           黑水鸭／Mint Dark Blue   ← 当前暗色
+   3) ███ mint_light_green         碧皓青／Mint Light Green
+   ...
+```
+
+每行三个色块依次是**底色 / 拼音色 / 首选底色**，用 ANSI 真彩色渲染。
+标记 `*` 表示当前启用。若不支持 24bit 颜色（或非 TTY），会自动退化为纯文本列表。
+
+### 行为
+
+- **只读** `<用户目录>/squirrel.yaml`（或 `weasel.yaml`）里的预设，**不改动任何原文件**
+- 结果写入 `<用户目录>/squirrel.custom.yaml`，用 Rime 的 `patch` 机制覆写
+- **保护已有自定义**：会剔除旧的 `color_scheme` 行再追加新值，
+  你在同一文件里的 `font_face`、`app_options` 等设置**原样保留**
+- 改动前自动备份为 `squirrel.custom.yaml.bak-<时间戳>`
+- 若已有 custom 文件且用的是嵌套写法（`style:` 块），也能正确读取当前值
+
+### 说明
+
+- 亮色/暗色分别对应「系统设置 → 外观」的浅色/深色模式
+- 皮肤定义来自方案的配置文件，因此安装了新方案后可用皮肤会自动变多
+- Windows 用户也可以用本脚本，但小狼毫本身已有图形界面，一般不需要
+
+---
+
 ## 发布：`.github/workflows/release.yaml`
 
 推 `v*` 标签即触发：
@@ -387,3 +446,9 @@ python3 tools/pack.py    # 与 CI 完全相同的命令与产物
 - 写 `.gitignore` / `.gitattributes` 时**必须用无 BOM 的 UTF-8**。
   PowerShell 5.1 的 `Set-Content -Encoding UTF8` 会写入 BOM，导致首行规则失效；
   脚本已改用 `[System.IO.File]::WriteAllText` + `UTF8Encoding($false)`。
+- 解析 YAML 时，**不要用 `case "$line" in [[:space:]]*\#*)` 判断注释行**——
+  它会连"值后带行尾注释"的数据行（如 `back_color: 0xefefef  # 底色`）一起跳过。
+  `skin.sh` 早期版本因此漏掉全部颜色字段。正确做法是先剥掉前导空白，
+  再判断是否以 `#` 开头。
+- 生成 ANSI 转义序列用 `printf`，**不要用 `$'...'` 与变量拼接**。
+  后者在变量穿插时引号极易被拆错，导致 `\033` 原样输出而非解释为 ESC。
