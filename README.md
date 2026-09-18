@@ -121,6 +121,47 @@ curl -fsSL https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/too
 
 > 需要注意: Windows 7 和 Windows Xp只能使用 0.14.3 版本的Weasel，无法使用本输入方案的全部功能，需要手动更新librime支援库：[WinXP和Win7使用薄荷输入法](https://www.mintimate.cc/zh/guide/faQ.html#winxp%E5%92%8Cwin7%E4%BD%BF%E7%94%A8%E8%96%84%E8%8D%B7%E8%BE%93%E5%85%A5%E6%B3%95)
 
+### 多设备同步（可选）
+
+Rime 的用户词典（你的打字习惯）和自定义配置可以通过 Git 在多台设备间同步。
+仓库自带脚本 `tools/rime-sync.sh`（macOS / Linux）和 `tools/rime-sync.ps1`（Windows）。
+
+**原理**：Rime 内置同步会把用户词典导出成
+`<sync_dir>/<installation_id>/*.userdb.txt` 文本快照，脚本把该目录当 Git 仓库传输，
+**合并仍由 Rime 完成**（按时间衰减加权，不会丢数据）。
+
+**首次设置**（每台设备都做）：
+
+1. 在 Rime 用户目录的 `installation.yaml` 里指定 `sync_dir`：
+
+   ```yaml
+   installation_id: "本机唯一标识"        # 已有，各设备须不同
+   sync_dir: D:\rime-sync                 # 新增，指向你的 Git 仓库
+   ```
+
+2. 初始化仓库并连远程（**建议用私有仓库**，用户词典含个人用语）：
+
+   ```bash
+   ./tools/rime-sync.sh --init
+   cd <sync_dir> && git remote add origin <私有仓库> && git push -u origin main
+   ```
+
+**日常使用**：
+
+```bash
+./tools/rime-sync.sh          # pull → 触发 Rime 同步 → commit & push
+./tools/rime-sync.sh --status # 只看状态
+```
+
+```powershell
+.\tools\rime-sync.ps1
+.\tools\rime-sync.ps1 -Status
+```
+
+> **注意**：同步是**手动**的，没有定时任务；「重新部署」也**不会**触发它。
+> 多设备使用时建议**错开时间**（改完一台、同步完，再动另一台）。
+> 详细说明与排查步骤见 [tools/README.md](tools/README.md)。
+
 ## Tips
 
 本地rime配置文件默认地址，如下

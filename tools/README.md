@@ -352,6 +352,109 @@ git checkout --theirs -- '*.userdb.txt'    # 或 --ours
 git add -A && git rebase --continue
 ```
 
+### 排查
+
+同步"看起来成功但没效果"通常有以下几种原因，按顺序检查：
+
+#### 1. 确认同步真的执行了
+
+脚本现在会校验 `sync_dir/<installation_id>/` 是否产生快照。若看到：
+
+```
+[!] Rime 没有在同步目录下创建本机快照目录
+    → 说明同步未真正执行
+```
+
+说明 `/sync` 没能让 Rime 写出东西，继续看下面几条。
+
+也可手动验证（把路径换成你的安装目录）：
+
+```cmd
+"D:\software\weasel\weasel-0.17.4\WeaselDeployer.exe" /sync
+echo 退出码: %ERRORLEVEL%
+```
+
+#### 2. 有 WeaselDeployer 进程占着（Windows 最常见）
+
+`WeaselDeployer.exe` 是**单实例**程序（用 `WeaselDeployerExclusiveMutex`）。
+已有一个实例在运行时，新的 `/sync` 会**以退出码 1 静默退出**——
+不写日志、不产生文件。
+
+典型场景：开着「方案选单设定」或「输入法设定」窗口时跑脚本。
+
+```cmd
+REM 查看是否有残留进程
+tasklist | findstr /i WeaselDeployer
+
+REM 有就全部结束掉
+taskkill /f /im WeaselDeployer.exe
+```
+
+> **注意**：「方案选单设定」窗口里**没有**「同步」选项，那是输入方案选择界面，
+> 与同步无关。同步只有两个入口：命令行 `/sync`，或托盘菜单的「同步用户数据」。
+
+#### 3. 弹出「方案选单设定」窗口而不是同步
+
+这说明 `/sync` 参数没有正确传给进程。`WeaselDeployer` 用 `wcscmp` 做
+**完全相等**比较，参数带引号就不匹配，于是落到 GUI 分支。
+
+脚本已改用 `ProcessStartInfo` 精确传参避免此问题；若仍出现，请确认用的是最新脚本。
+
+#### 4. 本机还没有用户词典数据
+
+`.userdb` 只在你**正常打字并上屏**之后才会产生（脚本提及"需正常打字并被记录"）。
+检查：
+
+```cmd
+dir "%APPDATA%\Rime\*.userdb"
+```
+
+有 `.userdb` 目录才会同步出 `.userdb.txt` 快照。
+
+#### 5. 看 Rime 日志
+
+```cmd
+dir "%TEMP%\rime.weasel"
+findstr /i "synchronizing sync_dir backing" "%TEMP%\rime.weasel\*"
+```
+
+成功的同步会打印：
+
+```
+I... deployment_tasks.cc] updating rime installation info.
+I... deployment_tasks.cc] sync dir: D:/workspace/github/rime-sync
+I... user_dict_manager.cc] synchronizing 1 user dicts.
+I... deployment_tasks.cc] backed up 31 config files to ...
+```
+
+一行都没有 → `/sync` 根本没跑起来（回到第 2 条）。
+
+#### 6. 找不到 WeaselDeployer.exe
+
+绿色版或自定义安装路径时，注册表里可能没有记录。用 `-WeaselDir` 显式指定：
+
+```powershell
+.\tools\rime-sync.ps1 -WeaselDir "D:\software\weasel\weasel-0.17.4"
+```
+
+注意填的是**目录**（`WeaselDeployer.exe` 所在处），不是 exe 路径本身。
+
+#### 7. 首次提交失败 / unborn branch
+
+```
+fatal: Updating an unborn branch with changes added to the index
+```
+
+出现在「分支还没有任何提交」**且**「暂存区已有 `git add` 的内容」时，
+常见于首次 `git commit` 因缺少 Git 身份而失败。先配置身份：
+
+```bash
+git config --global user.name  "你的名字"
+git config --global user.email "你的邮箱"
+```
+
+脚本已检测并跳过空分支上的 `pull`。
+
 ### 重要限制
 
 - **必须手动执行**：Rime 没有定时同步，`--build`（重新部署）也**不会**触发同步

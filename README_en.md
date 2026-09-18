@@ -117,6 +117,49 @@ curl -fsSL https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/too
 
 > Note: Windows 7 and Windows XP can only use Weasel 0.14.3, which cannot provide the full feature set of this schema and requires manually updating the librime support libraries: [Using Mint on WinXP and Win7](https://www.mintimate.cc/zh/guide/faQ.html#winxp%E5%92%8Cwin7%E4%BD%BF%E7%94%A8%E8%96%84%E8%8D%B7%E8%BE%93%E5%85%A5%E6%B3%95)
 
+### Multi-device sync (optional)
+
+Rime's user dictionary (your typing habits) and custom configs can be synced across
+machines via Git. The repo ships `tools/rime-sync.sh` (macOS / Linux) and
+`tools/rime-sync.ps1` (Windows).
+
+**How it works**: Rime's built-in sync exports the user dictionary to text snapshots at
+`<sync_dir>/<installation_id>/*.userdb.txt`. The script treats that directory as a Git
+repo. **Merging is still done by Rime** (time-decay weighting, so no data is lost).
+
+**First-time setup** (on every machine):
+
+1. Point `sync_dir` at your Git repo in `installation.yaml` (inside the Rime user dir):
+
+   ```yaml
+   installation_id: "unique-per-machine"   # already present; must differ per machine
+   sync_dir: D:\rime-sync                  # add this line
+   ```
+
+2. Initialize and connect a remote (**use a private repo** — the dictionary reveals
+   your vocabulary):
+
+   ```bash
+   ./tools/rime-sync.sh --init
+   cd <sync_dir> && git remote add origin <private-repo> && git push -u origin main
+   ```
+
+**Daily use**:
+
+```bash
+./tools/rime-sync.sh          # pull → trigger Rime sync → commit & push
+./tools/rime-sync.sh --status # status only
+```
+
+```powershell
+.\tools\rime-sync.ps1
+.\tools\rime-sync.ps1 -Status
+```
+
+> **Note**: syncing is **manual** — there is no scheduled job, and "redeploy" does
+> **not** trigger it. When using several machines, stagger the edits (finish and sync
+> one before touching the other). See [tools/README.md](tools/README.md) for details
+> and troubleshooting.
 ## Tips
 The default address of the local rime configuration file is as follows
 
