@@ -194,6 +194,41 @@ Write-Info "同步仓库: $Repo"
 # ---------------------------------------------------------------------------
 # Git 状态探测
 # ---------------------------------------------------------------------------
+# 运行原生命令并原样输出 stdout/stderr，返回退出码。
+#
+# 为什么需要它：Windows PowerShell 5.1 会把原生命令写到 stderr 的内容
+# 包装成 ErrorRecord；当 $ErrorActionPreference = 'Stop' 时会直接抛
+# NativeCommandError 终止脚本。而 git 的进度信息（如 pull 的
+# "From https://..."）正常就写到 stderr，于是出现"git : From ..."这种
+# 假报错。PS 7.2+ 才改掉这个行为。
+#
+# 解决办法：临时把 ErrorActionPreference 降为 Continue，并显式读取
+# 退出码。这样 stderr 只当作普通输出打印，不影响流程。
+function Invoke-Git {
+    param([string[]] $CmdArgs)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & git @CmdArgs 2>&1 | ForEach-Object { Write-Host "    $_" }
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
+# 静默版：只关心退出码，不要输出（用于探测性命令）
+function Invoke-GitQuiet {
+    param([string[]] $CmdArgs)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & git @CmdArgs 2>&1 | Out-Null
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
 function Test-GitIdentity {
     # 首次 commit 需要 user.name / user.email；Git for Windows 装完通常没配。
     $name = (git config --get user.name 2>$null)
@@ -212,8 +247,8 @@ function Test-UnbornBranch {
 
 function Test-HasStagedChanges {
     # 真：暂存区里已有 add 但未 commit 的内容
-    git -C $Repo diff --cached --quiet 2>$null
-    return ($LASTEXITCODE -ne 0)
+    $rc = Invoke-GitQuiet @('-C', $Repo, 'diff', '--cached', '--quiet')
+    return ($rc -ne 0)
 }
 
 function Assert-GitIdentity {
@@ -442,11 +477,7 @@ function Invoke-GitPull {
         return $true
     }
 
-    $hasRemote = $false
-    try {
-        git -C $Repo remote get-url origin 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) { $hasRemote = $true }
-    } catch { }
+    $hasRemote = (Invoke-GitQuiet @('-C', $Repo, 'remote', 'get-url', 'origin')) -eq 0
 
     if (-not $hasRemote) {
         Write-Info '未配置 origin，跳过 pull'
@@ -462,8 +493,8 @@ function Invoke-GitPull {
         return $true
     }
 
-    git -C $Repo pull --rebase --autostash 2>&1 | ForEach-Object { Write-Host "    $_" }
-    if ($LASTEXITCODE -ne 0) {
+    $rc = Invoke-Git @('-C', $Repo, 'pull', '--rebase', '--autostash')
+    if ($rc -ne 0) {
         Write-Warn 'git pull 失败'
         Write-Host '    若是冲突，处理建议：'
         Write-Host "      cd $Repo"
@@ -497,9 +528,18 @@ function Invoke-GitCommitPush {
     if (-not (Assert-GitIdentity)) { return $false }
 
     Write-Step '提交快照'
-    git -C $Repo add -A
+    $addRc = Invoke-GitQuiet @('-C', $Repo, 'add', '-A')
+    if ($addRc -ne 0) {
+        Write-Warn 'git add 失败'
+        return $false
+    }
     $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    git -C $Repo commit -q -m "sync: $env:COMPUTERNAME $stamp"
+    $commitRc = Invoke-GitQuiet @('-C', $Repo, 'commit', '-q', '-m', "sync: $env:COMPUTERNAME $stamp")
+    if ($commitRc -ne 0) {
+        Write-Warn "git commit 失败（退出码 $commitRc）"
+        Write-Host "      cd $Repo; git status   ## 查看原因"
+        return $false
+    }
     Write-Info '已提交'
 
     if ($NoPush) {
@@ -507,11 +547,7 @@ function Invoke-GitCommitPush {
         return $true
     }
 
-    $hasRemote = $false
-    try {
-        git -C $Repo remote get-url origin 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) { $hasRemote = $true }
-    } catch { }
+    $hasRemote = (Invoke-GitQuiet @('-C', $Repo, 'remote', 'get-url', 'origin')) -eq 0
 
     if (-not $hasRemote) {
         Write-Info '未配置 origin，已提交到本地'
@@ -521,25 +557,22 @@ function Invoke-GitCommitPush {
     Write-Step '推送到远程'
 
     # 判断当前分支是否已设置上游（首次 push 时没有）
-    $hasUpstream = $false
-    git -C $Repo rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) { $hasUpstream = $true }
+    $hasUpstream = (Invoke-GitQuiet @('-C', $Repo, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')) -eq 0
 
     if ($hasUpstream) {
-        git -C $Repo push -q 2>&1 | ForEach-Object { Write-Host "    $_" }
+        $null = Invoke-Git @('-C', $Repo, 'push', '-q')
     } else {
         # 远程已有内容（例如另一台设备先推过）时，--set-upstream 会因历史
         # 无关被拒。先尝试 rebase 合并，再设置上游推送。
-        $branch = (git -C $Repo rev-parse --abbrev-ref HEAD 2>$null)
+        $branch = (& git -C $Repo rev-parse --abbrev-ref HEAD 2>$null)
         Write-Info "首次推送，设置上游 origin/$branch"
 
-        git -C $Repo fetch -q origin 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            git -C $Repo rev-parse --verify "origin/$branch" 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 0) {
+        $fetchRc = Invoke-GitQuiet @('-C', $Repo, 'fetch', '-q', 'origin')
+        if ($fetchRc -eq 0) {
+            if ((Invoke-GitQuiet @('-C', $Repo, 'rev-parse', '--verify', "origin/$branch")) -eq 0) {
                 # 远程该分支已存在 -> 先 rebase
-                git -C $Repo rebase "origin/$branch" 2>&1 | ForEach-Object { Write-Host "    $_" }
-                if ($LASTEXITCODE -ne 0) {
+                $rc = Invoke-Git @('-C', $Repo, 'rebase', "origin/$branch")
+                if ($rc -ne 0) {
                     Write-Warn "与 origin/$branch 合并出现冲突"
                     Write-Host '    处理建议：'
                     Write-Host "      cd $Repo"
@@ -551,7 +584,7 @@ function Invoke-GitCommitPush {
                 }
             }
         }
-        git -C $Repo push -q --set-upstream origin $branch 2>&1 | ForEach-Object { Write-Host "    $_" }
+        $null = Invoke-Git @('-C', $Repo, 'push', '-q', '--set-upstream', 'origin', $branch)
     }
 
     if ($LASTEXITCODE -ne 0) {

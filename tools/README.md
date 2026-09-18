@@ -673,6 +673,11 @@ python3 tools/pack.py    # 与 CI 完全相同的命令与产物
   会给参数加字面引号，使进程收到 `""/sync""`；而它用 `wcscmp` 做完全相等
   比较，于是落到 GUI 分支弹出「方案选单设定」而非执行同步。脚本改用
   `ProcessStartInfo` 精确传参。
+- **PowerShell 5.1 会把 git 写到 stderr 的进度信息当成错误**。Windows 自带
+  的 PS 5.1 配合 `$ErrorActionPreference = 'Stop'` 时，`git pull` 输出的
+  `From https://...` 会被包装成 `NativeCommandError` 并终止脚本——**这是假报错**。
+  PS 7.2+ 才改掉该行为。脚本已用 `Invoke-Git` 封装：临时降级
+  `ErrorActionPreference` 并显式读取退出码，stderr 只当普通输出。
 - **只看退出码不足以判断同步成功**：`WeaselDeployer /sync` 可能因互斥锁或
   参数问题静默失败却返回 0。脚本会在同步后校验 `sync_dir/<installation_id>/`
   是否真的产生快照，否则明确报告"同步未真正执行"。
