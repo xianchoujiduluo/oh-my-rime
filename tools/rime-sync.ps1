@@ -279,18 +279,64 @@ function Invoke-RimeSync {
         return $true
     }
 
-    $p = Start-Process -FilePath $deployer -ArgumentList '/sync' -PassThru -ErrorAction SilentlyContinue
-    if (-not $p) {
-        Write-Warn '无法启动 WeaselDeployer'
+    # WeaselDeployer 用 WeaselDeployerExclusiveMutex 保证单实例：
+    # 只要已有一个实例在运行（例如开着「方案选单设定」窗口），
+    # 新进程会直接以退出码 1 静默退出，不写日志、不产生任何文件。
+    $busy = @(Get-Process -Name 'WeaselDeployer' -ErrorAction SilentlyContinue)
+    if ($busy.Count -gt 0) {
+        Write-Warn "已有 WeaselDeployer 进程在运行（PID: $($busy.Id -join ', ')）"
+        Write-Host '    它会占用互斥锁，导致本次同步被静默拒绝。'
+        Write-Host '    请关闭已打开的「小狼毫」设置窗口后重试。'
+        Write-Host '    若确认没有窗口，可先结束残留进程：'
+        Write-Host '        taskkill /f /im WeaselDeployer.exe'
         return $false
     }
-    if (-not $p.WaitForExit(60000)) {
+
+    # 不能用 Start-Process -ArgumentList：它会给参数加字面引号，
+    # 使进程收到 ""/sync"" 而非 /sync。而 WeaselDeployer 用
+    # wcscmp(L"/sync", lpCmdLine) 做【完全相等】比较，带引号就不匹配，
+    # 于是落到最后的 configurator.Run()，弹出「方案选单设定」窗口而非同步。
+    # 直接用 ProcessStartInfo 精确控制命令行，等价于手动执行。
+    $started = $false
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $deployer
+        $psi.Arguments = '/sync'
+        $psi.UseShellExecute = $false
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $started = $true
+    } catch {
+        Write-Warn "无法启动 WeaselDeployer: $($_.Exception.Message)"
+    }
+
+    if (-not $started) {
+        Write-Host '    可手动操作：在 CMD 里执行'
+        Write-Host "        `"$deployer`" /sync"
+        return $false
+    }
+
+    if (-not $proc.WaitForExit(60000)) {
         Write-Info '同步进程仍在后台运行'
-    } elseif ($p.ExitCode -ne 0) {
-        Write-Warn "WeaselDeployer 返回退出码 $($p.ExitCode)"
-        Write-Host "    可查看 `$env:TEMP 下的 rime.weasel.* 日志"
+        return $true
+    }
+
+    if ($proc.ExitCode -ne 0) {
+        Write-Warn "WeaselDeployer 返回退出码 $($proc.ExitCode)"
+        # 退出码 1 常见于：另一个 WeaselDeployer 实例在运行（占用了
+        # WeaselDeployerExclusiveMutex），此时它会静默退出、不写日志。
+        $others = Get-Process -Name 'WeaselDeployer' -ErrorAction SilentlyContinue
+        if ($others) {
+            Write-Host '    检测到仍有 WeaselDeployer 进程在运行（可能是已打开的设置窗口）：'
+            $others | ForEach-Object { Write-Host "        进程 $($_.Id)" }
+            Write-Host '    请关闭所有 WeaselDeployer 窗口后重试，或手动执行：'
+        } else {
+            Write-Host '    可查看日志：'
+        }
+        Write-Host "        `"$deployer`" /sync"
+        Write-Host "        dir `"$env:TEMP\rime.weasel`""
         return $false
     }
+
     # 给文件写入留一点时间，避免紧接着 git add 抓不到新快照
     Start-Sleep -Milliseconds 800
     return $true
@@ -537,7 +583,43 @@ $rimeSynced = $true
 if (-not (Invoke-GitPull)) { $gitOk = $false }
 
 if (-not $PushOnly) {
+    # 记录同步前的快照文件数，用于事后验证 Rime 是否真的写出了东西。
+    # 只检查 WeaselDeployer 的退出码是不够的——它可能被互斥锁挡住
+    # 或参数没传对而静默走错分支。
+    $beforeCount = 0
+    if (Test-Path -LiteralPath $Repo) {
+        $beforeCount = @(Get-ChildItem -LiteralPath $Repo -Recurse -File -ErrorAction SilentlyContinue).Count
+    }
+
     if (-not (Invoke-RimeSync)) { $rimeSynced = $false }
+
+    if ($rimeSynced -and (Test-Path -LiteralPath $Repo)) {
+        $afterFiles = @(Get-ChildItem -LiteralPath $Repo -Recurse -File -ErrorAction SilentlyContinue)
+        $afterCount = $afterFiles.Count
+        $delta = $afterCount - $beforeCount
+        if ($delta -gt 0) {
+            Write-Info "同步产生 $delta 个新文件"
+        } else {
+            # 文件数没变：可能是没有新数据（正常），也可能是同步根本没跑起来
+            $ownDir = Join-Path $Repo $installId
+            if (Test-Path -LiteralPath $ownDir) {
+                $snap = @(Get-ChildItem -LiteralPath $ownDir -Filter '*.userdb.txt' -ErrorAction SilentlyContinue)
+                if ($snap.Count -gt 0) {
+                    Write-Info "快照已就绪（$($snap.Count) 个 userdb 快照），本次无新增"
+                } else {
+                    Write-Warn "同步目录存在但没有 .userdb.txt 快照"
+                    Write-Host "    可能是本机还没有产生用户词典数据（需正常打字并被记录）"
+                }
+            } else {
+                Write-Warn "Rime 没有在同步目录下创建本机快照目录："
+                Write-Host "        $ownDir"
+                Write-Host '    → 说明同步未真正执行。常见原因：'
+                Write-Host '      • 有其它 WeaselDeployer 窗口占用了互斥锁'
+                Write-Host "      • 手动验证：`"$(Find-WeaselDeployer)`" /sync"
+                $rimeSynced = $false
+            }
+        }
+    }
 }
 
 if (-not (Invoke-GitCommitPush)) { $gitOk = $false }

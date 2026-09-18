@@ -479,6 +479,16 @@ python3 tools/pack.py    # 与 CI 完全相同的命令与产物
   注意这与 `.gitignore` / `.gitattributes` **相反**——那些文件绝不能带 BOM。
   两者冲突的根源：PS 5.1 需要 BOM 才能正确判定编码，而 `irm` 会把 BOM
   当普通字符传给 `iex`，所以 Windows 的推荐用法是**落盘后用 `-File` 执行**。
+- **`WeaselDeployer.exe` 是单实例程序**（`WeaselDeployerExclusiveMutex`）。
+  已有一个实例在运行时（例如开着「方案选单设定」窗口），新的 `/sync` 会
+  以退出码 1 **静默退出**——不写日志、不产生文件。脚本会预检并提示。
+- **不能用 `Start-Process -ArgumentList` 给 WeaselDeployer 传参**：PowerShell
+  会给参数加字面引号，使进程收到 `""/sync""`；而它用 `wcscmp` 做完全相等
+  比较，于是落到 GUI 分支弹出「方案选单设定」而非执行同步。脚本改用
+  `ProcessStartInfo` 精确传参。
+- **只看退出码不足以判断同步成功**：`WeaselDeployer /sync` 可能因互斥锁或
+  参数问题静默失败却返回 0。脚本会在同步后校验 `sync_dir/<installation_id>/`
+  是否真的产生快照，否则明确报告"同步未真正执行"。
 - **空分支（`git init` 后还没有首次提交）上不要执行 `git pull`**，
   否则报 `fatal: Updating an unborn branch with changes added to the index`。
   触发条件：分支无提交 **且** 暂存区已有 `git add` 的内容——
