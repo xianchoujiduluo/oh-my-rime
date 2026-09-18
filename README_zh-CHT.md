@@ -68,7 +68,7 @@ curl -fsSL https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/too
 **Windows** —— PowerShell 執行（無需管理員權限）：
 
 ```powershell
-irm https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.ps1 | iex
+$u='https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.ps1'; $f="$env:TEMP\omr-install.ps1"; irm $u -OutFile $f; powershell -ExecutionPolicy Bypass -File $f
 ```
 
 腳本會自動完成：下載最新版方案包 → 放入 Rime 使用者目錄 → 觸發重新部署，並保留你的自訂配置與使用者詞典。

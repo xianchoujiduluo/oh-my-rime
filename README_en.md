@@ -64,7 +64,7 @@ curl -fsSL https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/too
 **Windows** — run in PowerShell (no administrator rights needed):
 
 ```powershell
-irm https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.ps1 | iex
+$u='https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.ps1'; $f="$env:TEMP\omr-install.ps1"; irm $u -OutFile $f; powershell -ExecutionPolicy Bypass -File $f
 ```
 
 The script downloads the latest package, installs it into your Rime user directory, triggers a redeploy, and preserves your custom configs and user dictionary.

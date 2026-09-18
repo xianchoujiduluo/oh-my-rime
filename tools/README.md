@@ -82,14 +82,25 @@ curl -fsSL https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/too
 **Windows** —— PowerShell 里粘贴（无需管理员权限）：
 
 ```powershell
-irm https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.ps1 | iex
+$u='https://raw.githubusercontent.com/xianchoujiduluo/oh-my-rime/main/tools/install.ps1'; $f="$env:TEMP\omr-install.ps1"; irm $u -OutFile $f; powershell -ExecutionPolicy Bypass -File $f
 ```
 
-两个脚本都支持在管道/表达式方式下运行：
+> **为什么不是 `irm ... | iex`？**
+> `.ps1` 文件带 UTF-8 BOM（Windows PowerShell 5.1 需要它才能正确读中文，
+> 否则按 GBK 解码会报「字符串缺少终止符」）。而 `irm` 会把 BOM 当成
+> 普通字符（U+FEFF）拼在脚本开头，导致 `iex` 解析失败。
+> 先 `-OutFile` 落盘再用 `-File` 执行，BOM 会被正确当作编码标记识别。
+>
+> 若确实想用管道形式，需要手动去掉前导 BOM 字符：
+> ```powershell
+> $c = (irm <URL>) -replace "^[\uFEFF]", ""; iex $c
+> ```
+
+两个脚本的行为差异：
 
 - `install.sh` 的 `--help` 正文内嵌，不依赖 `$0`，因此 `curl | bash` 可用。
 - `install.ps1` 检测到非文件方式运行时改用异常而非 `exit` 中止，
-  因此 `irm | iex` **不会关闭你当前的 PowerShell 会话**。
+  因此即使管道执行也**不会关闭你当前的 PowerShell 会话**。
 
 ### 常用变体
 
@@ -446,6 +457,16 @@ python3 tools/pack.py    # 与 CI 完全相同的命令与产物
 - 写 `.gitignore` / `.gitattributes` 时**必须用无 BOM 的 UTF-8**。
   PowerShell 5.1 的 `Set-Content -Encoding UTF8` 会写入 BOM，导致首行规则失效；
   脚本已改用 `[System.IO.File]::WriteAllText` + `UTF8Encoding($false)`。
+- **`.ps1` 文件必须带 UTF-8 BOM**。Windows PowerShell 5.1 在**没有 BOM 时**
+  会按系统 ANSI 代码页（中文系统为 GBK）读取脚本，导致中文注释/字符串变乱码、
+  引号被吞、报 `字符串缺少终止符`/`MissingExpressionAfterToken` 之类的语法错误。
+  用 UTF-8 BOM 写入即可解决：
+  ```bash
+  printf '\xef\xbb\xbf' | cat - script.ps1 > tmp && mv tmp script.ps1
+  ```
+  注意这与 `.gitignore` / `.gitattributes` **相反**——那些文件绝不能带 BOM。
+  两者冲突的根源：PS 5.1 需要 BOM 才能正确判定编码，而 `irm` 会把 BOM
+  当普通字符传给 `iex`，所以 Windows 的推荐用法是**落盘后用 `-File` 执行**。
 - 解析 YAML 时，**不要用 `case "$line" in [[:space:]]*\#*)` 判断注释行**——
   它会连"值后带行尾注释"的数据行（如 `back_color: 0xefefef  # 底色`）一起跳过。
   `skin.sh` 早期版本因此漏掉全部颜色字段。正确做法是先剥掉前导空白，

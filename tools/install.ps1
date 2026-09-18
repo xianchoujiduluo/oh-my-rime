@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   oh-my-rime 安装 / 更新 / 卸载脚本 (Windows / 小狼毫 Weasel)
 

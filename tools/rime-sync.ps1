@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Rime 用户词典 Git 同步（Windows / 小狼毫 Weasel）
 
