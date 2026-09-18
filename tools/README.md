@@ -226,6 +226,85 @@ Rime 内置同步机制会把用户词典导出成文本快照：
 本脚本把 `sync_dir` 当作 Git 仓库来传输快照。**合并由 Rime 自己完成**
 （按时间衰减加权，见 `librime` 的 `formula_d`），Git 只负责搬文件。
 
+### 前提：两台设备必须用同一个方案
+
+这是最容易踩、且**失败时完全静默**的坑。
+
+Rime 的用户词典是**按名字（`db_name`）隔离**的，而 `db_name` 由方案配置决定：
+
+| 方案 | `translator/dictionary` | 生成的 userdb / 快照 |
+| --- | --- | --- |
+| 朙月拼音 | `luna_pinyin` | `luna_pinyin.userdb` / `luna_pinyin.userdb.txt` |
+| 薄荷拼音 | `rime_mint` | `rime_mint.userdb` / `rime_mint.userdb.txt` |
+
+同步时 `SynchronizeAll()` **只处理本机已存在的词典**，然后去找**同名**快照：
+
+```cpp
+string snapshot_file = dict_name + ".userdb.txt";   // 名字必须完全一致
+```
+
+所以：
+
+```
+Windows 用朙月拼音 → luna_pinyin.userdb  ←→ luna_pinyin.userdb.txt
+Mac     用薄荷拼音 → rime_mint.userdb    ←→ rime_mint.userdb.txt
+                              ↑
+                     两个 db_name 不同，永不合并
+```
+
+**症状**：脚本报告"同步完成"，仓库里两台设备的目录也都有文件，
+但**打字习惯就是不互通**，而且没有任何报错。
+
+**判断方法**：对比两台设备的快照文件名
+
+```bash
+find <sync_dir> -name '*.userdb.txt'
+```
+
+```
+<mac-id>/rime_mint.userdb.txt      ← 同名才会合并 ✅
+<win-id>/luna_pinyin.userdb.txt    ← 名字不同，各存各的 ❌
+```
+
+**解决办法**：让两台设备使用同一个方案。建议统一到**薄荷拼音**
+（词库更大）。切换后旧方案的词库数据不会丢失，只是新方案不读取它。
+
+### 查看与管理用户词典
+
+用户词典是本机的 `<db_name>.userdb/` **目录**（LevelDB，二进制，不是 SQLite），
+无法用文本编辑器或 SQLite 工具查看。
+
+要查看内容，用导出的文本快照：
+
+```bash
+# 快照本身就是 TSV 文本，直接看
+cat <sync_dir>/<installation_id>/<db_name>.userdb.txt
+```
+
+Windows 上另有一个图形化工具（Weasel **自带**，无需额外安装）：
+
+```cmd
+REM 注意：先关闭已打开的 WeaselDeployer 窗口
+REM 路径换成你自己的安装目录
+"%ProgramFiles%\Rime\WeaselDeployer.exe" /dict
+```
+
+「小狼毫 词典管理」窗口提供三个操作：
+
+| 按钮 | 作用 |
+| --- | --- |
+| 备份 | 生成快照 |
+| 导出 | 把选中的用户词典导出成文本 |
+| 导入 | 把文本**合入在列表中选中的那个用户词典** |
+
+> **导入的目标是"列表中选中的词典"**，不是由文件决定。
+> 且是**合入**（逐条写入）而非覆盖，已有词条会更新权重。
+
+> **不要跨方案导入**：朙月拼音是纯拼音编码，薄荷/万象用带声调编码，
+> 格式语义不同，直接导入可能产生错误词条。
+> 另外 `导出/导入` 用的是表格式（`词条\t编码\t权重`），
+> 与 `备份/恢复` 的 userdb 格式（`编码\t词条\t值`）**不能混用**。
+
 ### 首次设置（每台设备都要做）
 
 > **首次提交需要 Git 身份**。Git for Windows 装完通常没配 `user.name`/`user.email`，
@@ -410,6 +489,11 @@ dir "%APPDATA%\Rime\*.userdb"
 ```
 
 有 `.userdb` 目录才会同步出 `.userdb.txt` 快照。
+
+> 在**新设备**上恢复时最容易遇到这条：装好 Rime 后要先启用方案并打一次字，
+> 让本地生成 `.userdb`，同步才会去合并 Git 里的快照。
+> 若仓库里已有其它设备的快照而本机没有对应词典，
+> 请先确认两边的**方案名是否一致**，见上面的「前提」一节。
 
 #### 5. 看 Rime 日志
 
