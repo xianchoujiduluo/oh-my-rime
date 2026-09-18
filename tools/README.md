@@ -228,6 +228,18 @@ Rime 内置同步机制会把用户词典导出成文本快照：
 
 ### 首次设置（每台设备都要做）
 
+> **首次提交需要 Git 身份**。Git for Windows 装完通常没配 `user.name`/`user.email`，
+> 此时 `git commit` 会失败并留下「已 `git add` 但未 `commit`」的半初始化状态，
+> 之后 `git pull` 会报 `fatal: Updating an unborn branch with changes added to the index`。
+> 先配置身份即可：
+>
+> ```bash
+> git config --global user.name  "你的名字"
+> git config --global user.email "你的邮箱"
+> ```
+>
+> 脚本会检测这个情况并给出提示，同时会跳过空分支上的 `pull`。
+
 **第 1 步：在 `installation.yaml` 里指定 `sync_dir`**
 
 该文件位于 Rime 用户目录：
@@ -467,6 +479,10 @@ python3 tools/pack.py    # 与 CI 完全相同的命令与产物
   注意这与 `.gitignore` / `.gitattributes` **相反**——那些文件绝不能带 BOM。
   两者冲突的根源：PS 5.1 需要 BOM 才能正确判定编码，而 `irm` 会把 BOM
   当普通字符传给 `iex`，所以 Windows 的推荐用法是**落盘后用 `-File` 执行**。
+- **空分支（`git init` 后还没有首次提交）上不要执行 `git pull`**，
+  否则报 `fatal: Updating an unborn branch with changes added to the index`。
+  触发条件：分支无提交 **且** 暂存区已有 `git add` 的内容——
+  常见于首次 `git commit` 因缺少 Git 身份而失败之后。脚本已检测并跳过。
 - 解析 YAML 时，**不要用 `case "$line" in [[:space:]]*\#*)` 判断注释行**——
   它会连"值后带行尾注释"的数据行（如 `back_color: 0xefefef  # 底色`）一起跳过。
   `skin.sh` 早期版本因此漏掉全部颜色字段。正确做法是先剥掉前导空白，

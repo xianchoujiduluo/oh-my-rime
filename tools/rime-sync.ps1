@@ -192,6 +192,41 @@ $Repo = [System.IO.Path]::GetFullPath($Repo)
 Write-Info "同步仓库: $Repo"
 
 # ---------------------------------------------------------------------------
+# Git 状态探测
+# ---------------------------------------------------------------------------
+function Test-GitIdentity {
+    # 首次 commit 需要 user.name / user.email；Git for Windows 装完通常没配。
+    $name = (git config --get user.name 2>$null)
+    $mail = (git config --get user.email 2>$null)
+    if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($mail)) {
+        return $false
+    }
+    return $true
+}
+
+function Test-UnbornBranch {
+    # 真：仓库已有 .git，但当前分支还没有任何提交
+    $null = git -C $Repo rev-parse --verify HEAD 2>$null
+    return ($LASTEXITCODE -ne 0)
+}
+
+function Test-HasStagedChanges {
+    # 真：暂存区里已有 add 但未 commit 的内容
+    git -C $Repo diff --cached --quiet 2>$null
+    return ($LASTEXITCODE -ne 0)
+}
+
+function Assert-GitIdentity {
+    if (Test-GitIdentity) { return $true }
+    Write-Err 'Git 尚未配置提交身份，无法创建提交'
+    Write-Host '    请先执行（把值换成你自己的）：'
+    Write-Host '        git config --global user.name  "你的名字"'
+    Write-Host '        git config --global user.email "你的邮箱"'
+    Write-Host '    然后重新运行本脚本。'
+    return $false
+}
+
+# ---------------------------------------------------------------------------
 # 查找 WeaselDeployer.exe（与 install.ps1 相同的策略）
 # ---------------------------------------------------------------------------
 function Find-WeaselDeployer {
@@ -302,6 +337,15 @@ function Invoke-Init {
     Write-Host '    2. git remote add origin <你的私有仓库>'
     Write-Host "    3. git add -A; git commit -m 'init'; git push -u origin main"
     Write-Host '    4. 在每台设备上运行 .\rime-sync.ps1'
+    Write-Host ''
+
+    # 首次提交需要 Git 身份；Git for Windows 装完通常没配，是最常见的踩坑点。
+    if (-not (Test-GitIdentity)) {
+        Write-Warn '检测到 Git 还没配置提交身份，上一步的 git commit 会失败'
+        Write-Host '    请先执行（把值换成你自己的）：'
+        Write-Host '        git config --global user.name  "你的名字"'
+        Write-Host '        git config --global user.email "你的邮箱"'
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -363,14 +407,24 @@ function Invoke-GitPull {
         return $true
     }
 
+    # 空分支（还没有任何提交）时 git pull 会直接报
+    # "Updating an unborn branch with changes added to the index"，
+    # 且此时 pull 本身没有意义——没有本地历史可 rebase。跳过即可。
+    if (Test-UnbornBranch) {
+        Write-Info '当前分支还没有首次提交，跳过 pull'
+        Write-Host '    （首次提交后，后续运行才会真正拉取其他设备的快照）'
+        return $true
+    }
+
     git -C $Repo pull --rebase --autostash 2>&1 | ForEach-Object { Write-Host "    $_" }
     if ($LASTEXITCODE -ne 0) {
-        Write-Warn 'git pull 失败（可能有冲突）'
-        Write-Host '    处理建议：'
+        Write-Warn 'git pull 失败'
+        Write-Host '    若是冲突，处理建议：'
         Write-Host "      cd $Repo"
         Write-Host '      git status                              # 看冲突文件'
         Write-Host "      git checkout --theirs -- '*.userdb.txt' # 或 --ours"
         Write-Host '      git add -A; git rebase --continue'
+        Write-Host '    若是远程仓库为空/无跟踪分支，可先完成首次提交再重试。'
         return $false
     }
     return $true
@@ -387,6 +441,14 @@ function Invoke-GitCommitPush {
         Write-Info '无变化，无需提交'
         return $true
     }
+
+    # 空分支 + 暂存区已有内容时，git 会拒绝 pull/rebase；
+    # 这里先把已有暂存内容提交掉，避免留下"半初始化"状态。
+    if (Test-UnbornBranch) {
+        Write-Info '当前分支还没有首次提交，先完成首次提交'
+    }
+
+    if (-not (Assert-GitIdentity)) { return $false }
 
     Write-Step '提交快照'
     git -C $Repo add -A
@@ -411,9 +473,47 @@ function Invoke-GitCommitPush {
     }
 
     Write-Step '推送到远程'
-    git -C $Repo push -q 2>&1 | ForEach-Object { Write-Host "    $_" }
+
+    # 判断当前分支是否已设置上游（首次 push 时没有）
+    $hasUpstream = $false
+    git -C $Repo rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { $hasUpstream = $true }
+
+    if ($hasUpstream) {
+        git -C $Repo push -q 2>&1 | ForEach-Object { Write-Host "    $_" }
+    } else {
+        # 远程已有内容（例如另一台设备先推过）时，--set-upstream 会因历史
+        # 无关被拒。先尝试 rebase 合并，再设置上游推送。
+        $branch = (git -C $Repo rev-parse --abbrev-ref HEAD 2>$null)
+        Write-Info "首次推送，设置上游 origin/$branch"
+
+        git -C $Repo fetch -q origin 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            git -C $Repo rev-parse --verify "origin/$branch" 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                # 远程该分支已存在 -> 先 rebase
+                git -C $Repo rebase "origin/$branch" 2>&1 | ForEach-Object { Write-Host "    $_" }
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warn "与 origin/$branch 合并出现冲突"
+                    Write-Host '    处理建议：'
+                    Write-Host "      cd $Repo"
+                    Write-Host '      git status'
+                    Write-Host "      # 快照文件可直接取远端版本：git checkout --theirs -- '*.userdb.txt'"
+                    Write-Host '      git add -A; git rebase --continue'
+                    Write-Host "      git push -u origin $branch"
+                    return $false
+                }
+            }
+        }
+        git -C $Repo push -q --set-upstream origin $branch 2>&1 | ForEach-Object { Write-Host "    $_" }
+    }
+
     if ($LASTEXITCODE -ne 0) {
-        Write-Warn 'push 失败（远程可能有新提交）。请重试本脚本'
+        Write-Warn 'push 失败。若是首次推送且远端已有历史，请手动处理：'
+        Write-Host "      cd $Repo"
+        Write-Host '      git fetch origin'
+        Write-Host '      git rebase origin/main       # 或 git pull --rebase'
+        Write-Host '      git push -u origin main'
         return $false
     }
     Write-Info '已推送'

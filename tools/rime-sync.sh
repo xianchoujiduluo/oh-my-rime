@@ -255,25 +255,58 @@ trigger_sync() {
 # ---------------------------------------------------------------------------
 # Git 操作
 # ---------------------------------------------------------------------------
+# 是否已配置提交身份（首次 commit 必需）
+has_git_identity() {
+  local n m
+  n="$(git config --get user.name 2>/dev/null || true)"
+  m="$(git config --get user.email 2>/dev/null || true)"
+  [ -n "$n" ] && [ -n "$m" ]
+}
+
+# 是否是"空分支"：有 .git，但当前分支还没有任何提交
+is_unborn_branch() {
+  ! git -C "$REPO" rev-parse --verify HEAD >/dev/null 2>&1
+}
+
+assert_git_identity() {
+  if has_git_identity; then return 0; fi
+  warn "Git 尚未配置提交身份，无法创建提交"
+  printf '%s\n' "    请先执行（把值换成你自己的）："
+  printf '%s\n' "        git config --global user.name  \"你的名字\""
+  printf '%s\n' "        git config --global user.email \"你的邮箱\""
+  printf '%s\n' "    然后重新运行本脚本。"
+  return 1
+}
+
 git_pull() {
   step "拉取其他设备的更新"
   if [ "$DRY_RUN" = "1" ]; then
     printf '%s\n' "    [dry-run] git -C $REPO pull --rebase --autostash"
     return 0
   fi
-  # 没有 remote 或没有提交时 pull 会报错，这里容忍
-  if git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
-    if ! git -C "$REPO" pull --rebase --autostash 2>&1; then
-      warn "git pull 失败（可能有冲突）。"
-      printf '%s\n' "    处理建议："
-      printf '%s\n' "      cd $REPO"
-      printf '%s\n' "      git status              # 看冲突文件"
-      printf '%s\n' "      git checkout --theirs -- '*.userdb.txt'   # 或 --ours"
-      printf '%s\n' "      git add -A && git rebase --continue"
-      return 1
-    fi
-  else
+  if ! git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
     info "未配置 origin，跳过 pull"
+    return 0
+  fi
+
+  # 空分支（还没有任何提交）时 git pull 会报
+  # "Updating an unborn branch with changes added to the index"。
+  # 此时没有本地历史可 rebase，pull 本身也没有意义，跳过。
+  if is_unborn_branch; then
+    info "当前分支还没有首次提交，跳过 pull"
+    printf '%s\n' "    （首次提交后，后续运行才会真正拉取其他设备的快照）"
+    return 0
+  fi
+
+  if ! git -C "$REPO" pull --rebase --autostash 2>&1; then
+    warn "git pull 失败"
+    printf '%s\n' "    若是冲突，处理建议："
+    printf '%s\n' "      cd $REPO"
+    printf '%s\n' "      git status              # 看冲突文件"
+    printf '%s\n' "      git checkout --theirs -- '*.userdb.txt'   # 或 --ours"
+    printf '%s\n' "      git add -A && git rebase --continue"
+    printf '%s\n' "    若是远程仓库为空/无跟踪分支，可先完成首次提交再重试。"
+    return 1
   fi
 }
 
@@ -288,27 +321,75 @@ git_commit_push() {
     return 0
   fi
 
+  # 空分支 + 暂存区已有内容时 git 会拒绝 pull/rebase，
+  # 所以先把已有暂存内容提交掉，避免留下"半初始化"状态。
+  if is_unborn_branch; then
+    info "当前分支还没有首次提交，先完成首次提交"
+  fi
+
+  assert_git_identity || return 1
+
   step "提交快照"
   git -C "$REPO" add -A
   local host; host="$(hostname 2>/dev/null || echo unknown)"
-  git -C "$REPO" commit -q -m "sync: $host $(date '+%F %T')"
+  if ! git -C "$REPO" commit -q -m "sync: $host $(date '+%F %T')" 2>&1; then
+    warn "git commit 失败"
+    return 1
+  fi
   info "已提交"
 
-  if [ "$DO_PUSH" = "1" ]; then
-    if git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
-      step "推送到远程"
-      if git -C "$REPO" push -q 2>&1; then
-        info "已推送"
-      else
-        warn "push 失败（可能是远程有新提交）。请重试本脚本，或手动 git pull 后 push"
+  if [ "$DO_PUSH" != "1" ]; then
+    info "按 --no-push 保留在本地"
+    return 0
+  fi
+
+  if ! git -C "$REPO" remote get-url origin >/dev/null 2>&1; then
+    info "未配置 origin，已提交到本地"
+    return 0
+  fi
+
+  step "推送到远程"
+  local branch
+  branch="$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+
+  # 是否已设置上游分支
+  if git -C "$REPO" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+    if git -C "$REPO" push -q 2>&1; then
+      info "已推送"
+      return 0
+    fi
+    warn "push 失败（远程可能有新提交）。重试本脚本，或手动 git pull --rebase 后 push"
+    return 1
+  fi
+
+  # 首次推送：远程该分支可能已有历史（另一台设备先推过），
+  # 直接 --set-upstream 会因历史无关被拒，需先 rebase。
+  info "首次推送，设置上游 origin/$branch"
+  if git -C "$REPO" fetch -q origin 2>/dev/null; then
+    if git -C "$REPO" rev-parse --verify "origin/$branch" >/dev/null 2>&1; then
+      if ! git -C "$REPO" rebase "origin/$branch" 2>&1; then
+        warn "与 origin/$branch 合并出现冲突"
+        printf '%s\n' "    处理建议："
+        printf '%s\n' "      cd $REPO"
+        printf '%s\n' "      git status"
+        printf '%s\n' "      # 快照文件可直接取远端版本：git checkout --theirs -- '*.userdb.txt'"
+        printf '%s\n' "      git add -A && git rebase --continue"
+        printf '%s\n' "      git push -u origin $branch"
         return 1
       fi
-    else
-      info "未配置 origin，已提交到本地"
     fi
-  else
-    info "按 --no-push 保留在本地"
   fi
+
+  if git -C "$REPO" push -q --set-upstream origin "$branch" 2>&1; then
+    info "已推送"
+    return 0
+  fi
+  warn "push 失败。若远端已有历史，请手动："
+  printf '%s\n' "      cd $REPO"
+  printf '%s\n' "      git fetch origin"
+  printf '%s\n' "      git rebase origin/main"
+  printf '%s\n' "      git push -u origin main"
+  return 1
 }
 
 # ---------------------------------------------------------------------------
