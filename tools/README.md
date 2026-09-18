@@ -1,7 +1,13 @@
 # tools/
 
-本项目自带的打包与部署脚本。**不依赖任何第三方工具**（`pack.py` 仅用 Python 标准库），
+本项目自带的打包、安装与同步脚本。**不依赖任何第三方工具**（`pack.py` 仅用 Python 标准库），
 因此可以在本地和 CI 里跑同一份代码。
+
+| 脚本 | 用途 |
+| --- | --- |
+| `pack.py` | 打包为可分发的 `dist/oh-my-rime.zip` |
+| `install.sh` / `install.ps1` | 安装 / 更新 / 卸载配置方案 |
+| `rime-sync.sh` / `rime-sync.ps1` | 用 Git 同步**用户词典**（多设备） |
 
 ---
 
@@ -109,19 +115,6 @@ powershell -ExecutionPolicy Bypass -File $f -Uninstall
 powershell -ExecutionPolicy Bypass -File $f -Uninstall -Purge
 ```
 
-### 脚本方式（仓库内或已下载）
-
-```bash
-./tools/install.sh                       # 自动识别 Rime 用户目录
-./tools/install.sh --target ~/Library/Rime
-./tools/install.sh --version v1.0.0      # 指定版本
-./tools/install.sh --from ./oh-my-rime.zip  # 从本地包安装
-./tools/install.sh --uninstall           # 卸载（保留用户数据）
-./tools/install.sh --uninstall --purge   # 连缓存/用户词典一起删
-./tools/install.sh --dry-run             # 只打印动作
-./tools/install.sh --no-deploy           # 不自动重新部署
-```
-
 ### 共同特性
 
 - **安装 / 更新一体**：已安装则先按旧 `manifest.txt` 清理旧文件，再复制新文件
@@ -204,6 +197,146 @@ YAML 出错时，有问题的文件会被 Rime 移入 `<Rime 用户目录>\trash
 
 ---
 
+## 用户词典同步：`rime-sync.sh` / `rime-sync.ps1`
+
+把 **Rime 用户词典**（`.userdb`，你的输入习惯）通过 Git 在多台设备间同步。
+
+> **只同步用户词典**，不同步配置、皮肤、词库。配置用 `install.sh` 更新。
+
+### 原理
+
+Rime 内置同步机制会把用户词典导出成文本快照：
+
+```
+<sync_dir>/<installation_id>/<方案名>.userdb.txt
+```
+
+本脚本把 `sync_dir` 当作 Git 仓库来传输快照。**合并由 Rime 自己完成**
+（按时间衰减加权，见 `librime` 的 `formula_d`），Git 只负责搬文件。
+
+### 首次设置（每台设备都要做）
+
+**第 1 步：在 `installation.yaml` 里指定 `sync_dir`**
+
+该文件位于 Rime 用户目录：
+
+| 平台 | 路径 |
+| --- | --- |
+| macOS | `~/Library/Rime/installation.yaml` |
+| Windows | `%APPDATA%\Rime\installation.yaml` |
+| Linux | `~/.local/share/fcitx5/rime/installation.yaml`（或 `~/.config/ibus/rime/`） |
+
+它由 Rime 首次部署时生成，内容形如：
+
+```yaml
+distribution_code_name: Squirrel
+installation_id: "a1b2c3d4-..."     # 每台设备必须不同
+rime_version: 1.17.0
+```
+
+**加一行**（指向你的 Git 仓库，即 `sync_dir`）：
+
+```yaml
+sync_dir: /Users/你的名字/rime-sync
+```
+
+> ⚠️ **`installation_id` 每台设备必须不同**，否则设备会互相覆盖。
+> Rime 会按 `sync_dir/<installation_id>/` 存放各设备的快照。
+
+**第 2 步：初始化仓库**
+
+```bash
+./tools/rime-sync.sh --init          # macOS / Linux
+```
+
+```powershell
+.\tools\rime-sync.ps1 -Init          # Windows
+```
+
+它会创建目录、`git init`，并写入：
+
+- `.gitignore` —— 只追踪 `*.userdb.txt` 快照文本，忽略二进制
+- `.gitattributes` —— `*.userdb.txt merge=union`，冲突时保留双方
+
+**第 3 步：连远程（建议私有仓库）**
+
+```bash
+cd /Users/你的名字/rime-sync
+git remote add origin git@github.com:你的用户名/rime-sync.git
+git add -A && git commit -m init && git push -u origin main
+```
+
+> ⚠️ **务必用私有仓库**：用户词典会暴露你的常用词、人名等隐私。
+
+**第 4 步：其他设备**
+
+```bash
+git clone <你的仓库> ~/rime-sync
+# 再改该设备的 installation.yaml（installation_id 换一个、sync_dir 指过来）
+```
+
+### 日常使用
+
+```bash
+./tools/rime-sync.sh                 # 同步：pull → 触发 Rime 同步 → commit & push
+./tools/rime-sync.sh --status        # 只看状态
+./tools/rime-sync.sh --no-push       # 提交到本地但不推
+./tools/rime-sync.sh --push-only     # 不触发 Rime 同步，只提交推送
+./tools/rime-sync.sh --dry-run       # 只打印动作
+```
+
+```powershell
+.\tools\rime-sync.ps1
+.\tools\rime-sync.ps1 -Status
+.\tools\rime-sync.ps1 -NoPush
+.\tools\rime-sync.ps1 -PushOnly
+.\tools\rime-sync.ps1 -DryRun
+```
+
+### 执行顺序（重要）
+
+```
+git pull      → 拿到其他设备的快照
+Rime --sync   → Rime 合并所有快照并导出本机快照
+git commit/push → 推回去
+```
+
+顺序不能反，否则 Rime 读不到别的设备的数据。
+
+### 触发 Rime 同步的方式
+
+| 平台 | 命令 | 备注 |
+| --- | --- | --- |
+| macOS | `Squirrel --sync` | 通过分布式通知转给运行中的输入法，**需鼠须管在运行** |
+| Windows | `WeaselDeployer.exe /sync` | 自动查找安装目录（同 `install.ps1` 的策略） |
+| Linux | `rime_dict_manager --sync` | 无头模式，**不需要前端在运行**；需安装 `librime-bin` |
+
+找不到触发工具时，脚本会打印手动操作提示（菜单里的「同步用户数据」），
+并**明确区分**「Git 失败」与「Git 成功但未能自动触发 Rime 同步」两种情况。
+
+### 冲突处理
+
+`.gitattributes` 里的 `merge=union` 会让快照文件在冲突时**保留双方的行**——
+因为 Rime 会按时间衰减重新计算权重，多出来的行不会造成错误，比人工取舍更安全。
+
+若仍遇到冲突：
+
+```bash
+cd <sync_dir>
+git status
+git checkout --theirs -- '*.userdb.txt'    # 或 --ours
+git add -A && git rebase --continue
+```
+
+### 重要限制
+
+- **必须手动执行**：Rime 没有定时同步，`--build`（重新部署）也**不会**触发同步
+- **Windows 建议用任务计划程序**定时调用 `rime-sync.ps1`；macOS 可用 `launchd`
+- **各设备薄荷版本应一致**：万象词库切换后音标格式变过，跨版本同步可能声调显示异常
+- **不要与云盘混用**：同一目录同时被云盘和 Git 管理会产生冲突副本
+
+---
+
 ## 发布：`.github/workflows/release.yaml`
 
 推 `v*` 标签即触发：
@@ -249,3 +382,8 @@ python3 tools/pack.py    # 与 CI 完全相同的命令与产物
 - **Linux 需要额外插件**：`librime-plugin-lua`、`librime-plugin-octagram`，
   Windows/macOS 的安装包已内嵌，无需处理。`install.sh` 会检测并提示。
 - 修改 `pack.py` 的排除规则后，记得同步检查 `manifest.txt` 是否正确生成。
+- PowerShell 脚本里**不要用 `$Args` 作为参数名**——那是 PowerShell 的自动变量，
+  会导致实参被吞掉（`rime-sync.ps1` 早期版本踩过这个坑，已改为 `$CmdArgs`）。
+- 写 `.gitignore` / `.gitattributes` 时**必须用无 BOM 的 UTF-8**。
+  PowerShell 5.1 的 `Set-Content -Encoding UTF8` 会写入 BOM，导致首行规则失效；
+  脚本已改用 `[System.IO.File]::WriteAllText` + `UTF8Encoding($false)`。
