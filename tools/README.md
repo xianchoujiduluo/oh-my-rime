@@ -433,7 +433,24 @@ git add -A && git rebase --continue
 
 ### 排查
 
-同步"看起来成功但没效果"通常有以下几种原因，按顺序检查：
+#### 速查表
+
+同步涉及「Git 传输」和「Rime 合并」两层，任一环节静默失败都会表现成
+"同步完成但没效果"。按下表按症状定位：
+
+| 症状 | 可能原因 | 详见 |
+| --- | --- | --- |
+| `git : From https://...` + `NativeCommandError` | PowerShell 5.1 把 git 的 stderr 进度误判为错误（**假报错**） | §8 |
+| 弹出「方案选单设定」窗口 | `/sync` 参数没传到 WeaselDeployer | §3 |
+| `Rime 没有在同步目录下创建本机快照目录` | 同步被静默拒绝（互斥锁被占） | §2 |
+| 仓库里完全没有 `.userdb.txt` | 本机还没产生 `.userdb`（没打过字） | §4 |
+| **两台设备的习惯不互通** | **两边用的方案不同 → `db_name` 不一致** | 「前提」一节 |
+| 首次 `git commit` 失败 / `unborn branch` | 未配置 Git 身份 `user.name` / `user.email` | §7 |
+| 找不到 `WeaselDeployer.exe` | 绿色版或自定义安装路径 | §6 |
+| 一切正常但仍无变化 | 需要看 Rime 日志确认 | §5 |
+
+> 多数"同步没效果"集中在两点：**方案名不一致**（`db_name` 不同，永不合并）
+> 和 **`.userdb` 尚未生成**（本机还没打过字）。先查这两条。
 
 #### 1. 确认同步真的执行了
 
@@ -538,6 +555,26 @@ git config --global user.email "你的邮箱"
 ```
 
 脚本已检测并跳过空分支上的 `pull`。
+
+
+#### 8. 报 `NativeCommandError`（PowerShell 5.1 假报错）
+
+Windows 自带的 **PowerShell 5.1** 会把原生命令写到 **stderr** 的内容包装成
+`ErrorRecord`；脚本里设了 `$ErrorActionPreference = 'Stop'`，于是直接抛异常：
+
+```
+git : From https://github.com/xxx/rime-sync
++ FullyQualifiedErrorId : NativeCommandError
+```
+
+**这是假报错** —— `From https://...` 是 `git pull` 的正常进度输出，git 本身
+执行成功。**PowerShell 7.2+ 已修正该行为**，所以在新版 PS 上不会出现。
+
+脚本已用 `Invoke-Git` 封装解决（临时降级 `ErrorActionPreference` 并显式读取
+退出码）。若仍出现，说明用的是旧脚本，请重新下载最新版。
+
+> 顺带一提：`git` 把进度、警告、甚至部分正常输出写在 stderr 是**设计如此**，
+> 不能据此判断命令失败。判断成败要看**退出码**。
 
 ### 重要限制
 
@@ -646,13 +683,14 @@ python3 tools/pack.py    # 与 CI 完全相同的命令与产物
 
 ## 注意事项
 
+本节的条目是**开发/维护**时容易踩的坑（多为历史 bug 的成因）。
+用户遇到同步故障请先看上面的「[排查](#排查)」速查表。
+
 - **`tools/` 会被打包进用户包**（`pack.py` 不排除它）。用户因此可以直接用
   `install.sh` 更新自己。若不想分发脚本，可在 `pack.py` 的 `collect()` 里加过滤。
 - **Linux 需要额外插件**：`librime-plugin-lua`、`librime-plugin-octagram`，
   Windows/macOS 的安装包已内嵌，无需处理。`install.sh` 会检测并提示。
 - 修改 `pack.py` 的排除规则后，记得同步检查 `manifest.txt` 是否正确生成。
-- PowerShell 脚本里**不要用 `$Args` 作为参数名**——那是 PowerShell 的自动变量，
-  会导致实参被吞掉（`rime-sync.ps1` 早期版本踩过这个坑，已改为 `$CmdArgs`）。
 - 写 `.gitignore` / `.gitattributes` 时**必须用无 BOM 的 UTF-8**。
   PowerShell 5.1 的 `Set-Content -Encoding UTF8` 会写入 BOM，导致首行规则失效；
   脚本已改用 `[System.IO.File]::WriteAllText` + `UTF8Encoding($false)`。
@@ -666,25 +704,20 @@ python3 tools/pack.py    # 与 CI 完全相同的命令与产物
   注意这与 `.gitignore` / `.gitattributes` **相反**——那些文件绝不能带 BOM。
   两者冲突的根源：PS 5.1 需要 BOM 才能正确判定编码，而 `irm` 会把 BOM
   当普通字符传给 `iex`，所以 Windows 的推荐用法是**落盘后用 `-File` 执行**。
-- **`WeaselDeployer.exe` 是单实例程序**（`WeaselDeployerExclusiveMutex`）。
-  已有一个实例在运行时（例如开着「方案选单设定」窗口），新的 `/sync` 会
-  以退出码 1 **静默退出**——不写日志、不产生文件。脚本会预检并提示。
-- **不能用 `Start-Process -ArgumentList` 给 WeaselDeployer 传参**：PowerShell
-  会给参数加字面引号，使进程收到 `""/sync""`；而它用 `wcscmp` 做完全相等
-  比较，于是落到 GUI 分支弹出「方案选单设定」而非执行同步。脚本改用
-  `ProcessStartInfo` 精确传参。
-- **PowerShell 5.1 会把 git 写到 stderr 的进度信息当成错误**。Windows 自带
-  的 PS 5.1 配合 `$ErrorActionPreference = 'Stop'` 时，`git pull` 输出的
-  `From https://...` 会被包装成 `NativeCommandError` 并终止脚本——**这是假报错**。
-  PS 7.2+ 才改掉该行为。脚本已用 `Invoke-Git` 封装：临时降级
-  `ErrorActionPreference` 并显式读取退出码，stderr 只当普通输出。
-- **只看退出码不足以判断同步成功**：`WeaselDeployer /sync` 可能因互斥锁或
-  参数问题静默失败却返回 0。脚本会在同步后校验 `sync_dir/<installation_id>/`
-  是否真的产生快照，否则明确报告"同步未真正执行"。
-- **空分支（`git init` 后还没有首次提交）上不要执行 `git pull`**，
-  否则报 `fatal: Updating an unborn branch with changes added to the index`。
-  触发条件：分支无提交 **且** 暂存区已有 `git add` 的内容——
-  常见于首次 `git commit` 因缺少 Git 身份而失败之后。脚本已检测并跳过。
+- **调用 `WeaselDeployer.exe` 的三个坑**（都是"看起来成功但没做"）：
+  ① 它是单实例程序（`WeaselDeployerExclusiveMutex`），已有实例运行时新进程
+  以退出码 1 静默退出；② 不能用 `Start-Process -ArgumentList` 传参——
+  PowerShell 会加字面引号，而它用 `wcscmp` 完全相等比较，带引号就落到 GUI
+  分支；③ 它的退出码不可信，脚本因此会在同步后校验产物是否真的产生。
+  详见「[排查](#排查)」§2、§3。
+- **PowerShell 5.1 会把原生命令写到 stderr 的内容当成错误**
+  （`NativeCommandError`）。脚本已用 `Invoke-Git` 封装规避。详见
+  「[排查](#排查)」§8。
+- **PowerShell 脚本里不要用 `$Args` 作为参数名**——那是自动变量，会导致
+  实参被吞掉（已改用 `$CmdArgs`）。
+- **空分支上不要执行 `git pull`**（`fatal: Updating an unborn branch with
+  changes added to the index`）——分支无提交且暂存区已有内容时触发，
+  常见于首次 `commit` 因缺少 Git 身份而失败之后。脚本已检测并跳过。
 - 解析 YAML 时，**不要用 `case "$line" in [[:space:]]*\#*)` 判断注释行**——
   它会连"值后带行尾注释"的数据行（如 `back_color: 0xefefef  # 底色`）一起跳过。
   `skin.sh` 早期版本因此漏掉全部颜色字段。正确做法是先剥掉前导空白，
