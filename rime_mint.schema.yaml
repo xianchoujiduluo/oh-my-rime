@@ -182,7 +182,7 @@ reduce_english_filter:
   mode: all  # all | none | custom | 『留白』
   idx: 2        # 调整到第 idx 个位置
   # 自定义的单词列表，示例列表没有调整部分常用单词，如 and cat mail Mac but bad shit ……
-  words: [aid, ann,
+  words: [agent, aid, ann,
   bail, bait, bam, band, bans, bat, bay, bend, bent, benz, bib, bid, bien, biz, boc, bop, bos, bud, buf,
   cab, cad, cain, cam, cans, cap, cas, cef, chad, chan, chap, chef, cher, chew, chic, chin, chip, chit, coup, cum, cunt, cur,
   dab, dag, dal, dam, dent, dew, dial, diet, dim, din, dip, dis, dit, doug, dub, dug, dunn,

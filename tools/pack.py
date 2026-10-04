@@ -41,15 +41,16 @@ def collect(root, output=None):
 
     files = []
     for dirpath, dirnames, filenames in os.walk(root):
-        # 原地修改 dirnames 以剪枝：跳过 .git、一切点目录、以及输出目录
+        # 原地修改 dirnames 以剪枝：跳过 .git、一切点目录、__pycache__、以及输出目录
         dirnames[:] = sorted(
             d for d in dirnames
             if not d.startswith(".")
+            and d != "__pycache__"
             and not (prune_top and os.path.relpath(os.path.join(dirpath, d), root) == prune_top)
         )
 
         for name in sorted(filenames):
-            if name.startswith("."):
+            if name.startswith(".") or name.endswith(".pyc"):
                 continue
             full = os.path.join(dirpath, name)
             if out_abs and os.path.abspath(full) == out_abs:
