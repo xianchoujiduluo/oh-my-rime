@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>薄荷输入法 设置</title>
+<style>
+  :root {
+    --bg: #f5f5f7; --fg: #1d1d1f; --muted: #6e6e73;
+    --card: #fff; --line: #d2d2d7; --accent: #0071e3; --ok: #34c759; --err: #ff3b30;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e; --fg: #f5f5f7; --muted: #98989d;
+      --card: #2c2c2e; --line: #3a3a3c; --accent: #0a84ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+  }
+  header {
+    padding: 20px 24px 0; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  .path { color: var(--muted); font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
+  nav { display: flex; gap: 4px; padding: 16px 24px 0; border-bottom: 1px solid var(--line); }
+  nav button {
+    background: none; border: 0; border-bottom: 2px solid transparent;
+    color: var(--muted); font: inherit; font-weight: 500;
+    padding: 8px 14px; cursor: pointer; border-radius: 6px 6px 0 0;
+  }
+  nav button:hover { color: var(--fg); }
+  nav button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+  main { padding: 20px 24px 40px; }
+  section[hidden] { display: none; }
+  .toolbar {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--line);
+  }
+  .grow { flex: 1; }
+  button.act {
+    background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+    padding: 7px 16px; font: inherit; font-weight: 500; cursor: pointer;
+  }
+  button.act:disabled { opacity: .4; cursor: default; }
+  button.ghost {
+    background: none; color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 14px; font: inherit; cursor: pointer;
+  }
+  button.ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .note { color: var(--muted); font-size: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .card.picked-light { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .card.picked-dark { border-color: #8e8e93; box-shadow: 0 0 0 2px #8e8e93; }
+  .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .meta b { font-size: 13px; font-weight: 600; }
+  .meta code {
+    font-size: 11px; color: var(--muted);
+    font-family: ui-monospace, Menlo, monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .badges { display: flex; gap: 4px; flex-wrap: wrap; min-height: 18px; }
+  .badge {
+    font-size: 10px; padding: 1px 6px; border-radius: 4px;
+    background: var(--accent); color: #fff; font-weight: 600;
+  }
+  .badge.dark { background: #8e8e93; }
+  .row { display: flex; gap: 6px; }
+  .row button { flex: 1; padding: 5px 0; font-size: 12px; }
+  /* 候选窗模拟：用皮肤真实配色渲染 */
+  .ime { border-radius: 8px; padding: 4px 0; font-size: 13px; overflow: hidden; }
+  .ime .row2 { padding: 3px 10px; display: flex; gap: 8px; align-items: baseline; }
+  .ime .num { opacity: .75; }
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  ul.list li {
+    display: flex; gap: 12px; align-items: center; padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  ul.list li:last-child { border-bottom: 0; }
+  ul.list input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .name { font-weight: 500; }
+  pre.out {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; font-size: 12px; max-height: 320px; overflow: auto;
+    font-family: ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-all;
+  }
+  .flash {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--fg); color: var(--bg); padding: 9px 18px; border-radius: 8px;
+    font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 9;
+  }
+  .flash.show { opacity: 1; }
+  .flash.err { background: var(--err); color: #fff; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>薄荷输入法设置</h1>
+  <span class="path" id="userdir">读取中…</span>
+</header>
+
+<nav>
+  <button data-tab="skin" aria-selected="true">皮肤</button>
+  <button data-tab="schema" aria-selected="false">方案</button>
+  <button data-tab="dict" aria-selected="false">词典</button>
+</nav>
+
+<main>
+  <!-- 皮肤 -->
+  <section id="tab-skin">
+    <div class="toolbar">
+      <span class="note" id="skin-cur">当前：—</span>
+      <span class="grow"></span>
+      <button class="ghost" id="skin-reset">还原</button>
+      <button class="act" id="skin-apply" disabled>应用所选</button>
+    </div>
+    <div class="grid" id="skin-grid"></div>
+  </section>
+
+  <!-- 方案 -->
+  <section id="tab-schema" hidden>
+    <div class="toolbar">
+      <span class="note">勾选启用的输入方案，顺序即方案选单顺序。至少保留一个。</span>
+      <span class="grow"></span>
+      <button class="ghost" id="schema-reload">重载</button>
+      <button class="act" id="schema-apply">保存并部署</button>
+    </div>
+    <ul class="list" id="schema-list"></ul>
+  </section>
+
+  <!-- 词典 -->
+  <section id="tab-dict" hidden>
+    <div class="toolbar" id="dict-toolbar">
+      <button class="ghost" id="dict-refresh">刷新</button>
+      <button class="ghost" data-dict="list">列出词典</button>
+      <button class="act" data-dict="sync">立即同步</button>
+      <span class="grow"></span>
+      <button class="ghost" id="deploy">重新部署</button>
+    </div>
+    <div id="dict-body"></div>
+    <pre class="out" id="dict-out">（输出会显示在这里）</pre>
+  </section>
+</main>
+
+<div class="flash" id="flash"></div>
+
+<script>
+const TOKEN = "__TOKEN__";
+let STATE = null;
+let pickLight = null, pickDark = null;
+
+const $ = (id) => document.getElementById(id);
+
+function flash(msg, isErr) {
+  const el = $("flash");
+  el.textContent = msg;
+  el.className = "flash show" + (isErr ? " err" : "");
+  setTimeout(() => { el.className = "flash"; }, 2600);
+}
+
+async function api(path, body) {
+  const opt = { headers: { "X-Mint-Token": TOKEN } };
+  if (body !== undefined) {
+    opt.method = "POST";
+    opt.headers["Content-Type"] = "application/json";
+    opt.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opt);
+  const data = await res.json().catch(() => ({ error: "服务返回了非 JSON 内容" }));
+  if (!res.ok || data.error || data.ok === false) {
+    throw new Error(data.error || ("HTTP " + res.status));
+  }
+  return data;
+}
+
+/* 0xAARRGGBB / 0xRRGGBB / 十进制 → rgba()。AA 为透明度，可被 alpha 键覆盖。 */
+function toColor(raw, alphaOverride) {
+  if (raw === undefined || raw === null || raw === "") return null;
+  let hex = String(raw).trim();
+  let n;
+  if (/^0x[0-9a-fA-F]+$/.test(hex)) n = parseInt(hex.slice(2), 16);
+  else if (/^[0-9]+$/.test(hex)) n = parseInt(hex, 10);
+  else return null;
+
+  const digits = (hex.startsWith("0x") ? hex.length - 2 : hex.length);
+  let a = 1, r, g, b;
+  if (digits >= 8) {
+    a = ((n >>> 24) & 0xff) / 255;
+    r = (n >>> 16) & 0xff; g = (n >>> 8) & 0xff; b = n & 0xff;
+  } else {
+    r = (n >>> 16) & 0xff; g = (n >>> 8) & 0xff; b = n & 0xff;
+  }
+  if (alphaOverride !== undefined && alphaOverride !== null && alphaOverride !== "") {
+    const av = parseFloat(alphaOverride);
+    if (!isNaN(av)) a = av;
+  }
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+/* 往下落，直到取到可用颜色（不同皮肤字段覆盖度不一） */
+function pick(props, keys, alpha) {
+  for (const k of keys) {
+    const c = toColor(props[k], alpha);
+    if (c) return c;
+  }
+  return null;
+}
+
+function imeMock(s) {
+  const p = s.props || {};
+  const alpha = p.alpha !== undefined ? p.alpha : (p.translucency !== undefined ? 1 : undefined);
+  const back = pick(p, ["back_color"], alpha) || "rgba(255,255,255,1)";
+  const text = pick(p, ["candidate_text_color", "text_color"], alpha) || "#000";
+  const hback = pick(p, ["hilited_candidate_back_color", "hilited_back_color"], alpha) || back;
+  const htext = pick(p, ["hilited_candidate_text_color", "hilited_text_color"], alpha) || "#fff";
+  const label = pick(p, ["label_color", "candidate_text_color"], alpha) || text;
+  const hlabel = pick(p, ["hilited_candidate_label_color"], alpha) || htext;
+  const border = pick(p, ["border_color"], alpha);
+  const radius = p.corner_radius !== undefined ? parseInt(p.corner_radius, 10) : 8;
+
+  const rows = [["1", "薄荷"], ["2", "拼音"], ["3", "输入法"], ["4", "设置"]];
+  return `<div class="ime" style="background:${back};border-radius:${radius}px;` +
+    (border ? `border:1px solid ${border};` : "") + `">` +
+    rows.map(([n, t], i) => {
+      const bg = i === 0 ? hback : "transparent";
+      const fg = i === 0 ? htext : text;
+      const lc = i === 0 ? hlabel : label;
+      return `<div class="row2" style="background:${bg};color:${fg}">` +
+             `<span class="num" style="color:${lc}">${n}.</span><span>${t}</span></div>`;
+    }).join("") + `</div>`;
+}
+
+function renderSkin() {
+  const sk = STATE.skin;
+  $("skin-cur").textContent = `当前：亮色 ${sk.current_light || "—"} / 暗色 ${sk.current_dark || "—"}`;
+
+  // 没手动选过就按当前生效值预点亮
+  if (pickLight === null && pickDark === null) {
+    pickLight = sk.current_light;
+    pickDark = sk.current_dark;
+  }
+
+  $("skin-grid").innerHTML = sk.schemes.map((s) => {
+    const isL = s.id === pickLight, isD = s.id === pickDark;
+    const cls = "card" + (isL ? " picked-light" : "") + (isD ? " picked-dark" : "");
+    const badges = (isL ? '<span class="badge">亮色</span>' : "") +
+                   (isD ? '<span class="badge dark">暗色</span>' : "");
+    const author = s.props.author ? escapeHtml(s.props.author) : "";
+    return `<div class="${cls}">
+      ${imeMock(s)}
+      <div class="meta">
+        <b>${escapeHtml(s.props.name || s.id)}</b>
+        <code>${escapeHtml(s.id)}</code>
+        ${author ? `<code>${author}</code>` : ""}
+      </div>
+      <div class="badges">${badges}</div>
+      <div class="row">
+        <button class="ghost" data-pick="light" data-id="${escapeHtml(s.id)}">设为亮色</button>
+        <button class="ghost" data-pick="dark" data-id="${escapeHtml(s.id)}">设为暗色</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  $("skin-apply").disabled = (pickLight === sk.current_light && pickDark === sk.current_dark);
+}
+
+function escapeHtml(s) {
+  return String(s === undefined || s === null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function renderSchema() {
+  $("schema-list").innerHTML = STATE.schema.all.map((s) => `
+    <li>
+      <input type="checkbox" data-id="${escapeHtml(s.id)}" ${s.enabled ? "checked" : ""}>
+      <span class="name">${escapeHtml(s.name)}</span>
+      <code class="note">${escapeHtml(s.id)}</code>
+      <span class="grow"></span>
+      <span class="note">${escapeHtml(s.version)}</span>
+    </li>`).join("");
+}
+
+function renderDict() {
+  const d = STATE.dict;
+  const items = d.dicts.length
+    ? d.dicts.map((x) => `<li>
+        <span class="name">${escapeHtml(x.name)}</span>
+        <span class="grow"></span>
+        <button class="ghost" data-backup="${escapeHtml(x.name.replace(/\.userdb$/, ""))}">备份</button>
+      </li>`).join("")
+    : `<li><span class="note">还没有用户词典 —— 先在薄荷拼音下打字上屏，才会生成 userdb。</span></li>`;
+
+  $("dict-body").innerHTML = `
+    <div class="toolbar" style="border:0;padding:0;margin:0 0 12px">
+      <span class="note">同步目录：${escapeHtml(d.sync_dir || "（installation.yaml 里未设置 sync_dir）")}</span>
+    </div>
+    <ul class="list">${items}</ul>
+    <p class="note" style="margin-top:14px">
+      工具：${escapeHtml(d.tool || "未找到 rime_dict_manager")}
+    </p>`;
+}
+
+async function reload() {
+  STATE = await api("/api/state");
+  $("userdir").textContent = STATE.user_dir;
+  pickLight = null; pickDark = null;
+  renderSkin(); renderSchema(); renderDict();
+}
+
+/* 事件 */
+document.querySelectorAll("nav button").forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll("nav button").forEach((b) =>
+      b.setAttribute("aria-selected", String(b === btn)));
+    document.querySelectorAll("main section").forEach((s) =>
+      s.hidden = (s.id !== "tab-" + btn.dataset.tab));
+  };
+});
+
+$("skin-grid").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-pick]");
+  if (!b) return;
+  if (b.dataset.pick === "light") pickLight = b.dataset.id;
+  else pickDark = b.dataset.id;
+  renderSkin();
+});
+
+$("skin-reset").onclick = () => { pickLight = pickDark = null; reload().catch(err => flash(err.message, true)); };
+
+$("skin-apply").onclick = async () => {
+  try {
+    await api("/api/skin", { light: pickLight, dark: pickDark });
+    flash("已写入配置");
+    await reload();
+  } catch (err) { flash(err.message, true); }
+};
+
+$("schema-reload").onclick = () => reload().catch(err => flash(err.message, true));
+
+$("schema-apply").onclick = async () => {
+  const ids = [...document.querySelectorAll("#schema-list input:checked")].map((c) => c.dataset.id);
+  try {
+    await api("/api/schema", { ids });
+    flash("已保存，正在重新部署…");
+    const r = await api("/api/deploy", {});
+    flash(r.result && r.result.ok ? "保存并部署完成" : "已保存，但部署未成功");
+    await reload();
+  } catch (err) { flash(err.message, true); }
+};
+
+$("dict-refresh").onclick = () => reload().catch(err => flash(err.message, true));
+
+$("dict-toolbar").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-dict]");
+  if (!b) return;
+  try {
+    const r = await api("/api/dict", { action: b.dataset.dict });
+    const res = r.result;
+    $("dict-out").textContent = `$ ${res.cmd}\n(退出码 ${res.code})\n\n${res.stdout}\n${res.stderr}`.trim();
+    await reload();
+  } catch (err) { flash(err.message, true); }
+});
+
+$("dict-body").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-backup]");
+  if (!b) return;
+  try {
+    const r = await api("/api/dict", { action: "backup", name: b.dataset.backup });
+    const res = r.result;
+    $("dict-out").textContent = `$ ${res.cmd}\n(退出码 ${res.code})\n\n${res.stdout}\n${res.stderr}`.trim();
+  } catch (err) { flash(err.message, true); }
+});
+
+$("deploy").onclick = async () => {
+  try {
+    const r = await api("/api/deploy", {});
+    $("dict-out").textContent = `$ rime_deployer --build\n(退出码 ${r.result.code})\n\n` +
+      `${r.result.stdout}\n${r.result.stderr}`.trim();
+    flash(r.result.ok ? "部署完成" : "部署未成功");
+  } catch (err) { flash(err.message, true); }
+};
+
+reload().catch((err) => {
+  document.body.insertAdjacentHTML("afterbegin",
+    `<pre class="out" style="margin:20px">加载失败：${escapeHtml(err.message)}</pre>`);
+});
+</script>
+</body>
+</html>
